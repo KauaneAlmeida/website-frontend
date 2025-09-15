@@ -2,15 +2,12 @@
 Firebase Service (Simplified + Adjusted)
 
 Este módulo gerencia a integração com o Firebase Admin SDK e operações no Firestore.
-Suporta:
- - Local (arquivo físico serviceAccountKey.json)
+Agora o backend usa **apenas** o Secret File:
  - Render (Secret File montado em /etc/secrets/serviceAccountKey.json)
- - Variável de ambiente FIREBASE_CREDENTIALS (JSON inline)
 """
 
 import os
 import logging
-import json
 from typing import Dict, Any, Optional
 from datetime import datetime
 import firebase_admin
@@ -27,11 +24,8 @@ _firestore_client = None
 
 def initialize_firebase():
     """
-    Inicializa o Firebase Admin SDK.
-    Prioridade:
-      1. FIREBASE_CREDENTIALS (JSON em string)
-      2. Arquivo de Secret no Render (/etc/secrets/serviceAccountKey.json)
-      3. Arquivo local "serviceAccountKey.json"
+    Inicializa o Firebase Admin SDK a partir do Secret File.
+    Caminho esperado: /etc/secrets/serviceAccountKey.json
     """
     global _firebase_app, _firestore_client
 
@@ -40,31 +34,16 @@ def initialize_firebase():
         return
 
     try:
-        firebase_credentials = os.getenv("FIREBASE_CREDENTIALS")
-        cred = None
+        cred_path = "/etc/secrets/serviceAccountKey.json"
 
-        if firebase_credentials and firebase_credentials.strip().startswith("{"):
-            # Produção: credenciais no Render (JSON direto em variável)
-            logger.info("🔥 Inicializando Firebase com variável de ambiente")
-            creds_dict = json.loads(firebase_credentials)
-            cred = credentials.Certificate(creds_dict)
-
-        else:
-            # Secret File no Render ou arquivo local
-            cred_path = (
-                "/etc/secrets/serviceAccountKey.json"  # Render
-                if os.path.exists("/etc/secrets/serviceAccountKey.json")
-                else "serviceAccountKey.json"          # Local
+        if not os.path.exists(cred_path):
+            raise ValueError(
+                f"Arquivo de credenciais do Firebase não encontrado em {cred_path}. "
+                "Verifique se o Secret File está configurado corretamente no Render."
             )
 
-            if not os.path.exists(cred_path):
-                raise ValueError(
-                    f"Arquivo de credenciais do Firebase não encontrado: {cred_path}. "
-                    "Defina FIREBASE_CREDENTIALS ou configure o Secret File corretamente."
-                )
-
-            logger.info(f"🔥 Inicializando Firebase usando arquivo {cred_path}")
-            cred = credentials.Certificate(cred_path)
+        logger.info(f"🔥 Inicializando Firebase usando Secret File: {cred_path}")
+        cred = credentials.Certificate(cred_path)
 
         _firebase_app = firebase_admin.initialize_app(cred)
         _firestore_client = firestore.client()
@@ -265,12 +244,7 @@ async def get_firebase_service_status() -> Dict[str, Any]:
             "service": "firebase_service",
             "status": "active",
             "firestore_connected": True,
-            "credentials_source": (
-                "env_var"
-                if os.getenv("FIREBASE_CREDENTIALS") else
-                "secret_file" if os.path.exists("/etc/secrets/serviceAccountKey.json") else
-                "local_file"
-            ),
+            "credentials_source": "secret_file",
             "collections": ["conversation_flows", "leads", "user_sessions", "_health_check"],
             "message": "Firebase Firestore is operational",
             "timestamp": datetime.now().isoformat()
