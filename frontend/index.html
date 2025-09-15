@@ -16,7 +16,6 @@
       background: url('https://imgur.com/FKXnrb1.png') no-repeat center center fixed;
       background-size: cover;
     }
-
     .chat-container {
       max-width: 500px;
       width: 100%;
@@ -30,7 +29,6 @@
       backdrop-filter: blur(10px);
       transition: all 0.3s ease;
     }
-
     .chat-header {
       background: #bd9b68;
       color: white;
@@ -39,10 +37,8 @@
       font-size: 20px;
       font-weight: bold;
       letter-spacing: 1px;
-      background: #bd9b68;
       border-bottom: 2px solid ;
     }
-
     .messages {
       flex: 1;
       padding: 15px;
@@ -51,17 +47,12 @@
       flex-direction: column;
       gap: 12px;
     }
-
     .message {
       display: flex;
       align-items: flex-end;
       gap: 8px;
     }
-
-    .message.user {
-      justify-content: flex-end;
-    }
-
+    .message.user { justify-content: flex-end; }
     .bubble {
       padding: 10px 15px;
       border-radius: 15px;
@@ -70,33 +61,28 @@
       line-height: 1.4;
       position: relative;
     }
-
     .user .bubble {
       background: #492519;
       color: white;
       border-bottom-right-radius: 0;
     }
-
     .bot .bubble {
       background: #4682b4;
       color: white;
       border-bottom-left-radius: 0;
     }
-
     .avatar {
       width: 36px;
       height: 36px;
       border-radius: 50%;
       border: 2px solid white;
     }
-
     .input-area {
       display: flex;
       border-top: 2px solid #444;
       padding: 10px;
       background: rgba(44, 44, 44, 0.9);
     }
-
     .input-area input {
       flex: 1;
       border: none;
@@ -107,11 +93,7 @@
       background: #444;
       color: white;
     }
-
-    .input-area input::placeholder {
-      color: #bbb;
-    }
-
+    .input-area input::placeholder { color: #bbb; }
     .input-area button {
       margin-left: 8px;
       background: #ff9800;
@@ -123,38 +105,13 @@
       cursor: pointer;
       transition: 0.2s;
     }
-
-    .input-area button:hover {
-      background: #e07d00;
-    }
-
+    .input-area button:hover { background: #e07d00; }
     @media (max-width: 600px) {
-      .chat-container {
-        width: 90%;
-        height: 70vh;
-        border-radius: 20px;
-        margin: auto;
-      }
-
-      .chat-header {
-        font-size: 16px;
-        padding: 10px;
-      }
-
-      .bubble {
-        font-size: 13px;
-        max-width: 80%;
-      }
-
-      .input-area input {
-        font-size: 13px;
-        padding: 10px;
-      }
-
-      .input-area button {
-        padding: 8px 16px;
-        font-size: 13px;
-      }
+      .chat-container { width: 90%; height: 70vh; border-radius: 20px; margin: auto; }
+      .chat-header { font-size: 16px; padding: 10px; }
+      .bubble { font-size: 13px; max-width: 80%; }
+      .input-area input { font-size: 13px; padding: 10px; }
+      .input-area button { padding: 8px 16px; font-size: 13px; }
     }
   </style>
 </head>
@@ -174,12 +131,8 @@
   </div>
 
   <script>
-    // API URL configuration for Docker and local development
-    const API_BASE_URL = window.location.port === '8080' 
-      ? ''  // Use relative URLs when accessing via nginx on port 8080 (Docker)
-      : window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-      ? 'http://localhost:8000'  // Direct backend access for development
-      : `${window.location.protocol}//${window.location.hostname}:8000`;
+    // 🔗 Definindo URL fixa do backend no Render
+    const API_BASE_URL = "https://law-firm-backend-2iu2.onrender.com";
 
     function addMessage(text, sender = 'user') {
       const messagesDiv = document.getElementById('messages');
@@ -228,75 +181,27 @@
         });
 
         if (!response.ok) throw new Error('Erro na API');
-
         const data = await response.json();
-        
+
         if (data.session_id) {
           localStorage.setItem('chat_session_id', data.session_id);
         }
-        
+
         const botMessage = data.response || data.question || data.reply || "🤔 O bot ficou em silêncio...";
-        
         addMessage(botMessage, 'bot');
-        
-        if (data.response_type === 'phone_collected' || data.phone_submitted) {
-        } else if (botMessage.includes('WhatsApp') || botMessage.includes('número')) {
-          setTimeout(() => {
-            addPhoneCollectionUI();
-          }, 1000);
-        }
       } catch (err) {
         console.error('API Error:', err);
         addMessage("⚠️ Erro de conexão com o backend.", 'bot');
       }
     }
-    
-    function addPhoneCollectionUI() {
-      const messagesDiv = document.getElementById('messages');
-      const phoneDiv = document.createElement('div');
-      phoneDiv.className = 'message bot';
-      phoneDiv.innerHTML = `
-        <img src="https://imgur.com/z9lvA3Z.png" class="avatar" alt="Bot">
-        <div class="bubble">
-          <div style="margin-bottom: 10px;">Para continuar no WhatsApp, digite seu número:</div>
-          <input type="tel" id="phoneInput" placeholder="11999999999" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 5px; margin-bottom: 10px;">
-          <button onclick="submitPhone()" style="background: #25D366; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer;">📱 Enviar</button>
-        </div>
-      `;
-      messagesDiv.appendChild(phoneDiv);
-      messagesDiv.scrollTop = messagesDiv.scrollHeight;
-    }
-    
-    async function submitPhone() {
-      const phoneInput = document.getElementById('phoneInput');
-      const phone = phoneInput.value.trim();
-      if (!phone) return;
-      
-      try {
-        const sessionId = localStorage.getItem('chat_session_id');
-        const response = await fetch(`${API_BASE_URL}/api/v1/conversation/submit-phone`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone_number: phone, session_id: sessionId })
-        });
-        
-        const data = await response.json();
-        addMessage(data.message || "✅ Número enviado! Verifique seu WhatsApp.", 'bot');
-        
-        phoneInput.parentElement.parentElement.remove();
-      } catch (err) {
-        console.error('Phone submission error:', err);
-        addMessage("❌ Erro ao enviar número. Tente novamente.", 'bot');
-      }
-    }
-    
+
     window.addEventListener('load', async () => {
       try {
         const response = await fetch(`${API_BASE_URL}/api/v1/conversation/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' }
         });
-        
+
         if (response.ok) {
           const data = await response.json();
           if (data.session_id) {

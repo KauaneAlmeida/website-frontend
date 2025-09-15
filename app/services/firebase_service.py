@@ -2,7 +2,9 @@
 Firebase Service (Simplified + Adjusted)
 
 Este módulo gerencia a integração com o Firebase Admin SDK e operações no Firestore.
-Agora ajustado para bater com o formato existente no Firestore (id + question simples).
+Agora ajustado para suportar:
+ - Local (arquivo físico serviceAccountKey.json)
+ - Render (Secret File montado ou variável de ambiente FIREBASE_CREDENTIALS)
 """
 
 import os
@@ -24,8 +26,11 @@ _firestore_client = None
 
 def initialize_firebase():
     """
-    Inicializa o Firebase Admin SDK com credenciais do JSON.
-    Suporta tanto arquivo local (dev) quanto variável de ambiente (produção).
+    Inicializa o Firebase Admin SDK.
+    Prioridade:
+      1. FIREBASE_CREDENTIALS (JSON em string)
+      2. Arquivo de Secret no Render (/etc/secrets/serviceAccountKey.json)
+      3. Arquivo local "serviceAccountKey.json"
     """
     global _firebase_app, _firestore_client
 
@@ -35,21 +40,29 @@ def initialize_firebase():
 
     try:
         firebase_credentials = os.getenv("FIREBASE_CREDENTIALS")
+        cred = None
 
         if firebase_credentials and firebase_credentials.strip().startswith("{"):
-            # Produção: credenciais no Render (JSON direto)
+            # Produção: credenciais no Render (JSON direto em variável)
             logger.info("🔥 Inicializando Firebase com variáveis de ambiente")
             creds_dict = json.loads(firebase_credentials)
             cred = credentials.Certificate(creds_dict)
+
         else:
-            # Desenvolvimento local: arquivo físico
-            cred_path = firebase_credentials or "firebase-key.json"
+            # Secret File no Render ou arquivo local
+            cred_path = (
+                "/etc/secrets/serviceAccountKey.json"  # Render
+                if os.path.exists("/etc/secrets/serviceAccountKey.json")
+                else "serviceAccountKey.json"          # Local
+            )
+
             if not os.path.exists(cred_path):
                 raise ValueError(
                     f"Arquivo de credenciais do Firebase não encontrado: {cred_path}. "
-                    "Defina FIREBASE_CREDENTIALS corretamente."
+                    "Defina FIREBASE_CREDENTIALS ou configure o Secret File corretamente."
                 )
-            logger.info(f"🔥 Inicializando Firebase usando {cred_path}")
+
+            logger.info(f"🔥 Inicializando Firebase usando arquivo {cred_path}")
             cred = credentials.Certificate(cred_path)
 
         _firebase_app = firebase_admin.initialize_app(cred)
@@ -114,7 +127,7 @@ async def get_conversation_flow() -> Dict[str, Any]:
             logger.info("✅ Fluxo de conversa padrão criado")
             return default_flow
 
-        # 🔥 Normaliza os steps para garantir consistência
+        # 🔥 Normaliza os steps
         flow_data = flow_doc.to_dict()
         steps = flow_data.get("steps", [])
 
@@ -131,7 +144,7 @@ async def get_conversation_flow() -> Dict[str, Any]:
                     "question": str(step),
                 })
 
-        # Ensure step 0 exists if not present
+        # Garante que tenha o passo 0
         has_step_0 = any(step.get("id") == 0 for step in normalized_steps)
         if not has_step_0:
             normalized_steps.insert(0, {
@@ -141,7 +154,7 @@ async def get_conversation_flow() -> Dict[str, Any]:
 
         flow_data["steps"] = normalized_steps
         
-        # Ensure completion_message exists
+        # Garante que tenha completion_message
         if "completion_message" not in flow_data:
             flow_data["completion_message"] = "Obrigado! Suas informações foram registradas e entraremos em contato em breve."
         
@@ -156,12 +169,9 @@ async def get_conversation_flow() -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------
-# Fallback Questions (quando IA não estiver disponível)
+# Fallback Questions
 # --------------------------------------------------------------------------
 async def get_fallback_questions() -> list[str]:
-    """
-    Retorna apenas as perguntas (strings) do fluxo de conversa.
-    """
     try:
         flow = await get_conversation_flow()
         steps = flow.get("steps", [])
@@ -175,18 +185,6 @@ async def get_fallback_questions() -> list[str]:
 # Lead Management
 # --------------------------------------------------------------------------
 async def save_lead_data(lead_data: Dict[str, Any]) -> str:
-    """
-    Salva um lead simples no Firestore.
-    lead_data deve ser algo como:
-    {
-        "answers": [
-            {"id": 1, "answer": "João da Silva"},
-            {"id": 2, "answer": "Civil"},
-            {"id": 3, "answer": "Preciso de ajuda com contrato"},
-            {"id": 4, "answer": "Sim"}
-        ]
-    }
-    """
     try:
         db = get_firestore_client()
 
@@ -254,8 +252,6 @@ async def save_user_session(session_id: str, session_data: Dict[str, Any]) -> bo
 async def get_firebase_service_status() -> Dict[str, Any]:
     try:
         db = get_firestore_client()
-        
-        # Test Firebase connection with a simple operation
         try:
             test_collection = db.collection("conversation_flows").limit(1)
             docs = test_collection.get()
@@ -268,7 +264,12 @@ async def get_firebase_service_status() -> Dict[str, Any]:
             "service": "firebase_service",
             "status": "active",
             "firestore_connected": True,
-            "credentials_file": os.getenv("FIREBASE_CREDENTIALS", "firebase-key.json"),
+            "credentials_source": (
+                "env_var"
+                if os.getenv("FIREBASE_CREDENTIALS") else
+                "secret_file" if os.path.exists("/etc/secrets/serviceAccountKey.json") else
+                "local_file"
+            ),
             "collections": ["conversation_flows", "leads", "user_sessions", "_health_check"],
             "message": "Firebase Firestore is operational",
             "timestamp": datetime.now().isoformat()
