@@ -1,0 +1,55 @@
+services:
+  - type: web
+    name: law-firm-backend
+    env: docker
+    repo: https://github.com/KauaneAlmeida/lawyer-projeto
+    plan: free
+    dockerfilePath: ./Dockerfile.backend
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: WHATSAPP_BOT_URL
+        value: http://law-firm-whatsapp-bot:3000
+      - key: FIREBASE_CREDENTIALS
+        value: /firebase-key.json
+    secretFiles:
+      - path: /firebase-key.json
+        contents: |
+          {COLE O CONTEÚDO DO firebase-key.json DIRETO NO RENDER}
+
+  - type: web
+    name: law-firm-whatsapp-bot
+    env: docker
+    repo: https://github.com/KauaneAlmeida/lawyer-projeto
+    plan: free
+    dockerfilePath: ./Dockerfile.whatsapp
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      - key: FIREBASE_CREDENTIALS
+        value: /firebase-key.json
+      - key: FASTAPI_WEBHOOK_URL
+        value: http://law-firm-backend:8000/api/v1/whatsapp/webhook
+    secretFiles:
+      - path: /firebase-key.json
+        contents: |
+          {COLE O CONTEÚDO DO firebase-key.json DIRETO NO RENDER}
+
+    disk:
+      name: whatsapp_session
+      mountPath: /app/whatsapp_session
+      sizeGB: 1
+
+  - type: web
+    name: law-firm-frontend
+    env: docker
+    repo: https://github.com/KauaneAlmeida/lawyer-projeto
+    plan: free
+    dockerfilePath: ./Dockerfile.frontend
+    autoDeploy: true
