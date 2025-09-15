@@ -7,7 +7,7 @@ services:
     dockerfilePath: ./Dockerfile.backend
     autoDeploy: true
     envVars:
-      - key: NODE_ENV
+      - key: MODE_ENV
         value: production
       - key: PYTHONUNBUFFERED
         value: "1"
@@ -15,10 +15,6 @@ services:
         value: http://law-firm-whatsapp-bot:3000
       - key: FIREBASE_CREDENTIALS
         value: /firebase-key.json
-    secretFiles:
-      - path: /firebase-key.json
-        contents: |
-          {COLE O CONTEÚDO DO firebase-key.json DIRETO NO RENDER}
 
   - type: web
     name: law-firm-whatsapp-bot
@@ -36,10 +32,6 @@ services:
         value: /firebase-key.json
       - key: FASTAPI_WEBHOOK_URL
         value: http://law-firm-backend:8000/api/v1/whatsapp/webhook
-    secretFiles:
-      - path: /firebase-key.json
-        contents: |
-          {COLE O CONTEÚDO DO firebase-key.json DIRETO NO RENDER}
 
     disk:
       name: whatsapp_session
