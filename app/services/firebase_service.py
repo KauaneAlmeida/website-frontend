@@ -2,9 +2,10 @@
 Firebase Service (Simplified + Adjusted)
 
 Este módulo gerencia a integração com o Firebase Admin SDK e operações no Firestore.
-Agora ajustado para suportar:
+Suporta:
  - Local (arquivo físico serviceAccountKey.json)
- - Render (Secret File montado ou variável de ambiente FIREBASE_CREDENTIALS)
+ - Render (Secret File montado em /etc/secrets/serviceAccountKey.json)
+ - Variável de ambiente FIREBASE_CREDENTIALS (JSON inline)
 """
 
 import os
@@ -44,7 +45,7 @@ def initialize_firebase():
 
         if firebase_credentials and firebase_credentials.strip().startswith("{"):
             # Produção: credenciais no Render (JSON direto em variável)
-            logger.info("🔥 Inicializando Firebase com variáveis de ambiente")
+            logger.info("🔥 Inicializando Firebase com variável de ambiente")
             creds_dict = json.loads(firebase_credentials)
             cred = credentials.Certificate(creds_dict)
 
