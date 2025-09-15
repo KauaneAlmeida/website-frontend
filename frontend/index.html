@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>💬 Chat Shinobi — Dattebayo!</title>
+  <title>💬 Chat Advocacia — Escritório X!</title>
   <style>
     body {
       font-family: 'Poppins', sans-serif;
@@ -13,7 +13,7 @@
       display: flex;
       justify-content: center;
       align-items: center;
-      background: url('https://imgur.com/b0gXXOI.png') no-repeat center center fixed;
+      background: url('https://imgur.com/FKXnrb1.png') no-repeat center center fixed;
       background-size: cover;
     }
 
@@ -32,14 +32,15 @@
     }
 
     .chat-header {
-      background: #ff9800;
+      background: #bd9b68;
       color: white;
       padding: 15px;
       text-align: center;
       font-size: 20px;
       font-weight: bold;
       letter-spacing: 1px;
-      border-bottom: 2px solid #e07d00;
+      background: #bd9b68;
+      border-bottom: 2px solid ;
     }
 
     .messages {
@@ -71,7 +72,7 @@
     }
 
     .user .bubble {
-      background: #ff4500;
+      background: #492519;
       color: white;
       border-bottom-right-radius: 0;
     }
@@ -159,15 +160,15 @@
 </head>
 <body>
   <div class="chat-container">
-    <div class="chat-header">💬 Chat Shinobi — Dattebayo! 💥</div>
+    <div class="chat-header">💬 Chat Advocacia — Escritório X!</div>
     <div id="messages" class="messages">
       <div class="message bot">
-        <img src="https://imgur.com/8WbNd3B.png" class="avatar" alt="Kakashi">
-        <div class="bubble">Yo! Kakashi-sensei aqui 👀 Bem-vindo ao escritório, pronto para conversar?</div>
+        <img src="https://imgur.com/z9lvA3Z.png" class="avatar" alt="Bot">
+        <div class="bubble"> Bem-vindo ao escritório, pronto para conversar?</div>
       </div>
     </div>
     <div class="input-area">
-      <input id="messageInput" type="text" placeholder="Digite sua mensagem... 🍥">
+      <input id="messageInput" type="text" placeholder="Digite sua mensagem... ⚖️">
       <button onclick="sendMessage()">Enviar</button>
     </div>
   </div>
@@ -188,8 +189,8 @@
       const avatar = document.createElement('img');
       avatar.className = 'avatar';
       avatar.src = sender === 'user' 
-        ? 'https://imgur.com/vcCbXoV.png'
-        : 'https://imgur.com/8WbNd3B.png';
+        ? 'https://imgur.com/P9aCUJC.png'
+        : 'https://imgur.com/z9lvA3Z.png';
       avatar.alt = sender;
 
       const bubble = document.createElement('div');
@@ -230,21 +231,16 @@
 
         const data = await response.json();
         
-        // Store session ID for conversation continuity
         if (data.session_id) {
           localStorage.setItem('chat_session_id', data.session_id);
         }
         
-        // Handle different response types
         const botMessage = data.response || data.question || data.reply || "🤔 O bot ficou em silêncio...";
         
         addMessage(botMessage, 'bot');
         
-        // Check if we need to collect phone number
         if (data.response_type === 'phone_collected' || data.phone_submitted) {
-          // Phone was successfully collected, no need for additional UI
         } else if (botMessage.includes('WhatsApp') || botMessage.includes('número')) {
-          // Add phone collection UI if needed
           setTimeout(() => {
             addPhoneCollectionUI();
           }, 1000);
@@ -260,7 +256,7 @@
       const phoneDiv = document.createElement('div');
       phoneDiv.className = 'message bot';
       phoneDiv.innerHTML = `
-        <img src="https://imgur.com/8WbNd3B.png" class="avatar" alt="Kakashi">
+        <img src="https://imgur.com/z9lvA3Z.png" class="avatar" alt="Bot">
         <div class="bubble">
           <div style="margin-bottom: 10px;">Para continuar no WhatsApp, digite seu número:</div>
           <input type="tel" id="phoneInput" placeholder="11999999999" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 5px; margin-bottom: 10px;">
@@ -287,7 +283,6 @@
         const data = await response.json();
         addMessage(data.message || "✅ Número enviado! Verifique seu WhatsApp.", 'bot');
         
-        // Remove phone input
         phoneInput.parentElement.parentElement.remove();
       } catch (err) {
         console.error('Phone submission error:', err);
@@ -295,7 +290,6 @@
       }
     }
     
-    // Initialize conversation on page load
     window.addEventListener('load', async () => {
       try {
         const response = await fetch(`${API_BASE_URL}/api/v1/conversation/start`, {
