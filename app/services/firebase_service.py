@@ -24,8 +24,8 @@ _firestore_client = None
 
 def initialize_firebase():
     """
-    Inicializa o Firebase Admin SDK com um arquivo de credenciais JSON.
-    Só inicializa uma vez para evitar erro de duplicação.
+    Inicializa o Firebase Admin SDK com credenciais do JSON.
+    Suporta tanto arquivo local (dev) quanto variável de ambiente (produção).
     """
     global _firebase_app, _firestore_client
 
@@ -34,20 +34,25 @@ def initialize_firebase():
         return
 
     try:
-        cred_path = os.getenv("FIREBASE_CREDENTIALS", "firebase-key.json")
+        firebase_credentials = os.getenv("FIREBASE_CREDENTIALS")
 
-        if not os.path.exists(cred_path):
-            raise ValueError(
-                f"Arquivo de credenciais do Firebase não encontrado: {cred_path}. "
-                "Defina a variável FIREBASE_CREDENTIALS corretamente no seu .env."
-            )
+        if firebase_credentials and firebase_credentials.strip().startswith("{"):
+            # Produção: credenciais no Render (JSON direto)
+            logger.info("🔥 Inicializando Firebase com variáveis de ambiente")
+            creds_dict = json.loads(firebase_credentials)
+            cred = credentials.Certificate(creds_dict)
+        else:
+            # Desenvolvimento local: arquivo físico
+            cred_path = firebase_credentials or "firebase-key.json"
+            if not os.path.exists(cred_path):
+                raise ValueError(
+                    f"Arquivo de credenciais do Firebase não encontrado: {cred_path}. "
+                    "Defina FIREBASE_CREDENTIALS corretamente."
+                )
+            logger.info(f"🔥 Inicializando Firebase usando {cred_path}")
+            cred = credentials.Certificate(cred_path)
 
-        logger.info(f"🔥 Inicializando Firebase usando {cred_path}")
-
-        cred = credentials.Certificate(cred_path)
         _firebase_app = firebase_admin.initialize_app(cred)
-
-        # Inicializa o cliente do Firestore
         _firestore_client = firestore.client()
         logger.info("✅ Firebase inicializado com sucesso")
 
@@ -252,7 +257,6 @@ async def get_firebase_service_status() -> Dict[str, Any]:
         
         # Test Firebase connection with a simple operation
         try:
-            # Try a simple read operation to test connection
             test_collection = db.collection("conversation_flows").limit(1)
             docs = test_collection.get()
             logger.info("✅ Firebase Firestore connection test successful")
