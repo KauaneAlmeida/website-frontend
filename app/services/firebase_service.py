@@ -3,7 +3,7 @@ Firebase Service (Simplified + Adjusted)
 
 Este módulo gerencia a integração com o Firebase Admin SDK e operações no Firestore.
 Agora o backend usa **apenas** o Secret File:
- - Render (Secret File montado em /etc/secrets/serviceAccountKey.json)
+ - Render (Secret File montado em /etc/secrets/firebase-key.json)
 """
 
 import os
@@ -25,7 +25,7 @@ _firestore_client = None
 def initialize_firebase():
     """
     Inicializa o Firebase Admin SDK a partir do Secret File.
-    Caminho esperado: /etc/secrets/serviceAccountKey.json
+    Caminho esperado: /etc/secrets/firebase-key.json
     """
     global _firebase_app, _firestore_client
 
@@ -34,7 +34,7 @@ def initialize_firebase():
         return
 
     try:
-        cred_path = "/etc/secrets/serviceAccountKey.json"
+        cred_path = "/etc/secrets/firebase-key.json"
 
         if not os.path.exists(cred_path):
             raise ValueError(
