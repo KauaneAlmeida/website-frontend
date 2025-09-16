@@ -95,7 +95,7 @@
         "id": 3,
         "field": "situation",
         "question": "Ok {user_name}, entendi que se trata de uma questão em {area}. Você poderia me descrever brevemente o que aconteceu? Assim consigo direcionar melhor sua demanda.",
-        "question": "Em qual área jurídica você precisa de ajuda?\n\n• Penal\n• Saúde Liminar",
+        "validation": {
           "min_length": 5,
           "required": true,
           "type": "description"

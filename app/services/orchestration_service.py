@@ -292,7 +292,7 @@ class IntelligentHybridOrchestrator:
             logger.info(f"⚡ Firebase fallback activated for web session {session_id}")
             
             # Get schema-based conversation flow
-                {"id": 2, "field": "area_of_law", "question": "Em qual área do direito você precisa de ajuda?\n\n• Penal\n• Saúde Liminar", "validation": {"min_length": 3}},
+            flow = await self._get_schema_flow()
             steps = flow.get("steps", [])
             
             if not steps:
