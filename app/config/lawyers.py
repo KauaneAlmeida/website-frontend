@@ -58,7 +58,7 @@ def create_lead_notification_message(lead_name: str, lead_phone: str, category: 
     """
     Create the notification message for lawyers.
     
-    NOTE: This function is now deprecated in favor of the new lead assignment service
+    NOTE: This function is deprecated in favor of the new lead assignment service
     which includes clickable links for assignment.
     
     Args:
@@ -69,7 +69,7 @@ def create_lead_notification_message(lead_name: str, lead_phone: str, category: 
     Returns:
         str: Formatted notification message
     """
-    return f"""🚨 New lead received!
+    return f"""🚨 DEPRECATED - New lead received!
 
 Name: {lead_name}
 Phone: {lead_phone}
@@ -77,4 +77,4 @@ Category: {category}
 
 Please review and decide who will take this case.
 
-NOTE: This message format is deprecated. New leads use clickable assignment links."""
+NOTE: This message format is deprecated. New leads now use clickable assignment links via the lead assignment service."""

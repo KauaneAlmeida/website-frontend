@@ -589,13 +589,15 @@ class IntelligentHybridOrchestrator:
                         additional_info={"situation": situation_full}
                     )
                     
-                    if notification_result["success"]:
-                        logger.info(f"✅ Lawyer notifications sent: {notification_result['notifications_sent']}/{notification_result['total_lawyers']}")
+                    if notification_result.get("success"):
+                        notifications_sent = notification_result.get("notifications_sent", 0)
+                        total_lawyers = notification_result.get("total_lawyers", 0)
+                        logger.info(f"✅ Lawyer assignment notifications sent: {notifications_sent}/{total_lawyers}")
                     else:
                         logger.error(f"❌ Failed to send lawyer notifications: {notification_result.get('error', 'Unknown error')}")
                         
                 except Exception as notification_error:
-                    logger.error(f"❌ Error sending lawyer notifications: {str(notification_error)}")
+                    logger.error(f"❌ Error sending lawyer assignment notifications: {str(notification_error)}")
                     # Don't fail the entire flow if notifications fail
                     
             except Exception as save_error:

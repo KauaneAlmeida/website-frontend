@@ -165,12 +165,22 @@ class LeadAssignmentService:
                 lead_id, lawyer_info["name"], lead_data["lead_name"], lawyer_id
             )
             
+            # Generate WhatsApp redirect URL
+            whatsapp_url = self._generate_whatsapp_url(
+                lead_data["phone"],
+                lead_data["lead_name"],
+                lawyer_info["name"],
+                lead_data["category"],
+                lead_data["situation"]
+            )
+            
             return {
                 "success": True,
                 "message": f"You have successfully taken this lead: {lead_data['lead_name']}",
                 "status": "assigned",
                 "assigned_to": lawyer_info["name"],
-                "lead_name": lead_data["lead_name"]
+                "lead_name": lead_data["lead_name"],
+                "whatsapp_url": whatsapp_url
             }
             
         except Exception as e:
@@ -181,6 +191,29 @@ class LeadAssignmentService:
                 "status": "error",
                 "error": str(e)
             }
+    
+    def _generate_whatsapp_url(
+        self,
+        lead_phone: str,
+        lead_name: str,
+        lawyer_name: str,
+        category: str,
+        situation: str
+    ) -> str:
+        """Generate WhatsApp URL with pre-filled message."""
+        # Clean phone number for WhatsApp URL
+        clean_phone = ''.join(filter(str.isdigit, lead_phone))
+        if not clean_phone.startswith("55"):
+            clean_phone = f"55{clean_phone}"
+        
+        # Create message
+        message = f"Hello {lead_name}, I am {lawyer_name} and I will take care of your {category} case. Situation: {situation[:100]}{'...' if len(situation) > 100 else ''}"
+        
+        # URL encode the message
+        import urllib.parse
+        encoded_message = urllib.parse.quote(message)
+        
+        return f"https://wa.me/{clean_phone}?text={encoded_message}"
     
     async def _save_lead_to_firebase(self, lead_id: str, lead_data: Dict[str, Any]) -> bool:
         """Save lead data to Firebase."""

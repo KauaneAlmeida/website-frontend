@@ -6,7 +6,7 @@ Routes for handling lead assignments with clickable links.
 
 import logging
 from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.services.lead_assignment_service import lead_assignment_service
 
@@ -25,7 +25,7 @@ async def assign_lead_to_lawyer(lead_id: str, lawyer_id: str):
         lawyer_id (str): ID/phone of the lawyer
         
     Returns:
-        HTMLResponse: Success or error message
+        RedirectResponse or HTMLResponse: WhatsApp redirect or error message
     """
     try:
         logger.info(f"🎯 Lead assignment request - Lead: {lead_id}, Lawyer: {lawyer_id}")
@@ -34,83 +34,89 @@ async def assign_lead_to_lawyer(lead_id: str, lawyer_id: str):
         result = await lead_assignment_service.assign_lead_to_lawyer(lead_id, lawyer_id)
         
         if result["success"]:
-            # Success - lead assigned
-            html_content = f"""
-            <!DOCTYPE html>
-            <html lang="pt-BR">
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>✅ Lead Assigned Successfully</title>
-                <style>
-                    body {{
-                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        margin: 0;
-                        padding: 20px;
-                        min-height: 100vh;
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                    }}
-                    .container {{
-                        background: white;
-                        border-radius: 15px;
-                        padding: 40px;
-                        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-                        text-align: center;
-                        max-width: 500px;
-                        width: 100%;
-                    }}
-                    .success-icon {{
-                        font-size: 4rem;
-                        color: #28a745;
-                        margin-bottom: 20px;
-                    }}
-                    .title {{
-                        color: #28a745;
-                        font-size: 1.8rem;
-                        font-weight: bold;
-                        margin-bottom: 15px;
-                    }}
-                    .message {{
-                        color: #333;
-                        font-size: 1.1rem;
-                        line-height: 1.6;
-                        margin-bottom: 20px;
-                    }}
-                    .lead-info {{
-                        background: #f8f9fa;
-                        border-radius: 10px;
-                        padding: 20px;
-                        margin: 20px 0;
-                        border-left: 4px solid #28a745;
-                    }}
-                    .footer {{
-                        color: #666;
-                        font-size: 0.9rem;
-                        margin-top: 30px;
-                    }}
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="success-icon">✅</div>
-                    <h1 class="title">Lead Successfully Assigned!</h1>
-                    <p class="message">{result['message']}</p>
-                    <div class="lead-info">
-                        <strong>Lead:</strong> {result.get('lead_name', 'N/A')}<br>
-                        <strong>Assigned to:</strong> {result.get('assigned_to', 'N/A')}
+            # Success - redirect to WhatsApp
+            whatsapp_url = result.get("whatsapp_url")
+            if whatsapp_url:
+                logger.info(f"✅ Redirecting to WhatsApp: {whatsapp_url}")
+                return RedirectResponse(url=whatsapp_url, status_code=302)
+            else:
+                # Fallback if WhatsApp URL generation failed
+                html_content = f"""
+                <!DOCTYPE html>
+                <html lang="pt-BR">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>✅ Lead Assigned Successfully</title>
+                    <style>
+                        body {{
+                            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                            margin: 0;
+                            padding: 20px;
+                            min-height: 100vh;
+                            display: flex;
+                            justify-content: center;
+                            align-items: center;
+                        }}
+                        .container {{
+                            background: white;
+                            border-radius: 15px;
+                            padding: 40px;
+                            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+                            text-align: center;
+                            max-width: 500px;
+                            width: 100%;
+                        }}
+                        .success-icon {{
+                            font-size: 4rem;
+                            color: #28a745;
+                            margin-bottom: 20px;
+                        }}
+                        .title {{
+                            color: #28a745;
+                            font-size: 1.8rem;
+                            font-weight: bold;
+                            margin-bottom: 15px;
+                        }}
+                        .message {{
+                            color: #333;
+                            font-size: 1.1rem;
+                            line-height: 1.6;
+                            margin-bottom: 20px;
+                        }}
+                        .lead-info {{
+                            background: #f8f9fa;
+                            border-radius: 10px;
+                            padding: 20px;
+                            margin: 20px 0;
+                            border-left: 4px solid #28a745;
+                        }}
+                        .footer {{
+                            color: #666;
+                            font-size: 0.9rem;
+                            margin-top: 30px;
+                        }}
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="success-icon">✅</div>
+                        <h1 class="title">Lead Successfully Assigned!</h1>
+                        <p class="message">{result['message']}</p>
+                        <div class="lead-info">
+                            <strong>Lead:</strong> {result.get('lead_name', 'N/A')}<br>
+                            <strong>Assigned to:</strong> {result.get('assigned_to', 'N/A')}
+                        </div>
+                        <div class="footer">
+                            Please contact the client as soon as possible.<br>
+                            <small>Law Firm Assignment System</small>
+                        </div>
                     </div>
-                    <div class="footer">
-                        Please contact the client as soon as possible.<br>
-                        <small>Law Firm Assignment System</small>
-                    </div>
-                </div>
-            </body>
-            </html>
-            """
-            return HTMLResponse(content=html_content, status_code=200)
+                </body>
+                </html>
+                """
+                return HTMLResponse(content=html_content, status_code=200)
         
         else:
             # Error or already assigned
