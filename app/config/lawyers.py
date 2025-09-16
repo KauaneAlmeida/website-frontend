@@ -58,6 +58,9 @@ def create_lead_notification_message(lead_name: str, lead_phone: str, category: 
     """
     Create the notification message for lawyers.
     
+    NOTE: This function is now deprecated in favor of the new lead assignment service
+    which includes clickable links for assignment.
+    
     Args:
         lead_name (str): Name of the lead
         lead_phone (str): Phone number of the lead
@@ -72,4 +75,6 @@ Name: {lead_name}
 Phone: {lead_phone}
 Category: {category}
 
-Please review and decide who will take this case."""
+Please review and decide who will take this case.
+
+NOTE: This message format is deprecated. New leads use clickable assignment links."""

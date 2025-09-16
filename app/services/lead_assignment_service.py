@@ -51,7 +51,7 @@ class LeadAssignmentService:
             # Prepare lead data for Firebase
             lead_data = {
                 "lead_id": lead_id,
-                "name": lead_name,
+                "lead_name": lead_name,
                 "phone": lead_phone,
                 "category": category,
                 "situation": situation,
@@ -157,15 +157,20 @@ class LeadAssignmentService:
             
             # Send confirmation to the lawyer who took the case
             await self._send_assignment_confirmation(
-                lawyer_info, lead_data["name"], lead_id
+                lawyer_info, lead_data["lead_name"], lead_id
+            )
+            
+            # Notify other lawyers that the case has been taken
+            await self._notify_other_lawyers_case_taken(
+                lead_id, lawyer_info["name"], lead_data["lead_name"], lawyer_id
             )
             
             return {
                 "success": True,
-                "message": f"✅ You have successfully taken this lead: {lead_data['name']}",
+                "message": f"You have successfully taken this lead: {lead_data['lead_name']}",
                 "status": "assigned",
                 "assigned_to": lawyer_info["name"],
-                "lead_name": lead_data["name"]
+                "lead_name": lead_data["lead_name"]
             }
             
         except Exception as e:
@@ -312,6 +317,40 @@ Situation: {situation[:200]}{'...' if len(situation) > 200 else ''}
             
         except Exception as e:
             logger.error(f"❌ Error sending assignment confirmation: {str(e)}")
+            return False
+    
+    async def _notify_other_lawyers_case_taken(
+        self,
+        lead_id: str,
+        assigned_lawyer_name: str,
+        lead_name: str,
+        assigned_lawyer_id: str
+    ) -> bool:
+        """Notify other lawyers that the case has been taken."""
+        try:
+            lawyers = get_lawyers_for_notification()
+            notification_message = f"ℹ️ The lead '{lead_name}' has been assigned to {assigned_lawyer_name}."
+            
+            for lawyer in lawyers:
+                # Skip the lawyer who took the case
+                if lawyer["phone"] == assigned_lawyer_id:
+                    continue
+                
+                try:
+                    whatsapp_number = format_lawyer_phone_for_whatsapp(lawyer["phone"])
+                    await baileys_service.send_whatsapp_message(
+                        whatsapp_number, 
+                        notification_message
+                    )
+                    logger.info(f"📢 Notified {lawyer['name']} that case was taken")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Error notifying {lawyer['name']}: {str(e)}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error notifying other lawyers: {str(e)}")
             return False
 
 

@@ -16,6 +16,7 @@ from app.config.lawyers import (
     create_lead_notification_message
 )
 from app.services.baileys_service import baileys_service
+from app.services.lead_assignment_service import lead_assignment_service
 
 logger = logging.getLogger(__name__)
 
@@ -49,87 +50,22 @@ class LawyerNotificationService:
         try:
             logger.info(f"🚨 Sending lead notifications - Name: {lead_name}, Category: {category}")
             
-            # Get lawyer list
-            lawyers = get_lawyers_for_notification()
+            # Use the new lead assignment service with clickable links
+            situation = additional_info.get("situation", "") if additional_info else ""
             
-            if not lawyers:
-                logger.warning("⚠️ No lawyers configured for notifications")
-                return {
-                    "success": False,
-                    "error": "No lawyers configured",
-                    "notifications_sent": 0
-                }
-            
-            # Create notification message
-            notification_message = create_lead_notification_message(
-                lead_name, lead_phone, category
+            result = await lead_assignment_service.create_lead_with_assignment_links(
+                lead_name=lead_name,
+                lead_phone=lead_phone,
+                category=category,
+                situation=situation,
+                additional_data=additional_info
             )
             
-            # Add additional context if provided
-            if additional_info:
-                situation = additional_info.get("situation", "")
-                if situation:
-                    notification_message += f"\n\nSituação: {situation[:100]}..."
-            
-            # Send notifications to all lawyers
-            results = []
-            successful_notifications = 0
-            
-            for lawyer in lawyers:
-                try:
-                    lawyer_name = lawyer["name"]
-                    lawyer_phone = lawyer["phone"]
-                    whatsapp_number = format_lawyer_phone_for_whatsapp(lawyer_phone)
-                    
-                    logger.info(f"📤 Sending notification to {lawyer_name} ({lawyer_phone})")
-                    
-                    # Send notification with retry logic
-                    success = await self._send_notification_with_retry(
-                        whatsapp_number, 
-                        notification_message,
-                        lawyer_name
-                    )
-                    
-                    results.append({
-                        "lawyer": lawyer_name,
-                        "phone": lawyer_phone,
-                        "success": success,
-                        "timestamp": datetime.now().isoformat()
-                    })
-                    
-                    if success:
-                        successful_notifications += 1
-                        logger.info(f"✅ Notification sent successfully to {lawyer_name}")
-                    else:
-                        logger.error(f"❌ Failed to send notification to {lawyer_name}")
-                    
-                    # Small delay between messages to avoid rate limiting
-                    await asyncio.sleep(1)
-                    
-                except Exception as lawyer_error:
-                    logger.error(f"❌ Error sending notification to {lawyer.get('name', 'Unknown')}: {str(lawyer_error)}")
-                    results.append({
-                        "lawyer": lawyer.get("name", "Unknown"),
-                        "phone": lawyer.get("phone", "Unknown"),
-                        "success": False,
-                        "error": str(lawyer_error),
-                        "timestamp": datetime.now().isoformat()
-                    })
-            
-            # Log summary
-            logger.info(f"📊 Notification summary: {successful_notifications}/{len(lawyers)} sent successfully")
-            
-            return {
-                "success": successful_notifications > 0,
-                "notifications_sent": successful_notifications,
-                "total_lawyers": len(lawyers),
-                "results": results,
-                "lead_info": {
-                    "name": lead_name,
-                    "phone": lead_phone,
-                    "category": category
-                }
-            }
+            return result.get("notifications", {
+                "success": False,
+                "error": "Failed to create lead with assignment links",
+                "notifications_sent": 0
+            })
             
         except Exception as e:
             logger.error(f"❌ Error in lawyer notification service: {str(e)}")

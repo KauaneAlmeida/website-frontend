@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from app.routes.chat import router as chat_router
 from app.routes.conversation import router as conversation_router
 from app.routes.whatsapp import router as whatsapp_router
+from app.routes.leads import router as leads_router
 
 # Import services for startup
 from app.services.firebase_service import initialize_firebase
@@ -58,6 +59,7 @@ app.add_middleware(
 app.include_router(chat_router, prefix="/api/v1", tags=["Chat"])
 app.include_router(conversation_router, prefix="/api/v1", tags=["Conversation"])
 app.include_router(whatsapp_router, prefix="/api/v1", tags=["WhatsApp"])
+app.include_router(leads_router, prefix="/api/v1", tags=["Leads"])
 
 # -------------------------
 # Startup & Shutdown Events
