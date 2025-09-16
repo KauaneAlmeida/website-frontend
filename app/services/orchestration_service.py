@@ -630,14 +630,14 @@ Essas informações foram coletadas na landing page e estão vinculadas a este c
             # Send single final WhatsApp message
             whatsapp_success = False
             try:
-                # Send final message to user
+                # Send final message to user (this is the old system message, keeping for compatibility)
                 await baileys_service.send_whatsapp_message(whatsapp_number, final_whatsapp_message)
-                logger.info(f"📤 Final WhatsApp message sent to user {phone_formatted}")
+                logger.info(f"📤 System WhatsApp message sent to user {phone_formatted}")
                 
                 whatsapp_success = True
                 
             except Exception as whatsapp_error:
-                logger.error(f"❌ Error sending WhatsApp messages: {str(whatsapp_error)}")
+                logger.error(f"❌ Error sending system WhatsApp message: {str(whatsapp_error)}")
                 whatsapp_success = False
 
             # Return confirmation message for web interface
@@ -645,7 +645,7 @@ Essas informações foram coletadas na landing page e estão vinculadas a este c
 
 Perfeito! Suas informações foram registradas com sucesso. Nossa equipe entrará em contato em breve.
 
-{'✅ Mensagem enviada para seu WhatsApp!' if whatsapp_success else '⚠️ Houve um problema ao enviar a mensagem do WhatsApp, mas suas informações foram salvas.'}"""
+{'✅ Mensagens enviadas para seu WhatsApp!' if whatsapp_success else '⚠️ Houve um problema ao enviar as mensagens do WhatsApp, mas suas informações foram salvas.'}"""
 
             return final_message
 
