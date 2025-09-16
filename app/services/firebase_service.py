@@ -92,7 +92,7 @@ async def get_conversation_flow() -> Dict[str, Any]:
                 "steps": [
                     {"id": 0, "question": "Olá! Para garantir que registramos corretamente suas informações, vamos começar do início. Tudo bem?"},
                     {"id": 1, "question": "Qual é o seu nome completo?"},
-                    {"id": 2, "question": "Em qual área do direito você precisa de ajuda?\n\n• Penal\n• Civil\n• Trabalhista\n• Família\n• Empresarial"},
+                    {"id": 2, "question": "Em qual área do direito você precisa de ajuda?\n\n• Penal\n• Saúde Liminar"},
                     {"id": 3, "question": "Por favor, descreva brevemente sua situação ou problema jurídico."},
                     {"id": 4, "question": "Gostaria de agendar uma consulta com nosso advogado especializado? (Sim ou Não)"},
                 ],
@@ -179,7 +179,9 @@ async def save_lead_data(lead_data: Dict[str, Any]) -> str:
 
         leads_ref = db.collection("leads")
         doc_ref = leads_ref.add(lead_doc)
-        return doc_ref[1].id
+        lead_id = doc_ref[1].id
+        logger.info(f"💾 Lead saved with ID: {lead_id}")
+        return lead_id
 
     except Exception as e:
         logger.error(f"❌ Erro ao salvar lead: {str(e)}")

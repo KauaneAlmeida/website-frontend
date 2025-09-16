@@ -13,6 +13,7 @@ from app.services.firebase_service import (
 )
 from app.services.ai_chain import ai_orchestrator
 from app.services.baileys_service import baileys_service
+from app.services.lawyer_notification_service import lawyer_notification_service
 
 logger = logging.getLogger(__name__)
 
@@ -291,7 +292,7 @@ class IntelligentHybridOrchestrator:
             logger.info(f"⚡ Firebase fallback activated for web session {session_id}")
             
             # Get schema-based conversation flow
-            flow = await self._get_schema_flow()
+                {"id": 2, "field": "area_of_law", "question": "Em qual área do direito você precisa de ajuda?\n\n• Penal\n• Saúde Liminar", "validation": {"min_length": 3}},
             steps = flow.get("steps", [])
             
             if not steps:
@@ -453,7 +454,14 @@ class IntelligentHybridOrchestrator:
             # Ensure proper name format (capitalize each word)
             return " ".join(word.capitalize() for word in answer.split())
         elif field_type == "area" or step_id == 2:
-            return answer.title()
+            # Normalize area answers to match our two options
+            answer_lower = answer.lower()
+            if any(keyword in answer_lower for keyword in ["penal", "criminal", "crime"]):
+                return "Penal"
+            elif any(keyword in answer_lower for keyword in ["saude", "saúde", "liminar", "health", "injunction"]):
+                return "Saúde Liminar"
+            else:
+                return answer.title()
         elif field_type == "description" or step_id == 3:
             return answer  # Accept any description
         elif field_type == "phone":
@@ -489,8 +497,13 @@ class IntelligentHybridOrchestrator:
             words = answer.split()
             return len(words) >= 2 and all(len(word) >= 2 for word in words)
         elif step_id == 2:  # Area validation
-            # Accept any area with minimum length
-            return len(answer) >= 3
+            # Only accept Penal or Saúde Liminar
+            answer_lower = answer.lower()
+            valid_areas = [
+                "penal", "criminal", "crime",
+                "saude", "saúde", "liminar", "saude liminar", "saúde liminar", "health", "injunction"
+            ]
+            return any(keyword in answer_lower for keyword in valid_areas) and len(answer) >= 3
         elif step_id == 3:  # Situation validation
             # Require meaningful description
             return len(answer) >= 5
@@ -564,8 +577,27 @@ class IntelligentHybridOrchestrator:
 
             # Save lead data
             try:
-                await save_lead_data({"answers": answers})
+                lead_id = await save_lead_data({"answers": answers})
                 logger.info(f"💾 Lead saved for session {session_id}: {len(answers)} answers")
+                
+                # 🚨 NEW: Send notifications to lawyers
+                try:
+                    notification_result = await lawyer_notification_service.notify_lawyers_of_new_lead(
+                        lead_name=user_name,
+                        lead_phone=phone_clean,
+                        category=area,
+                        additional_info={"situation": situation_full}
+                    )
+                    
+                    if notification_result["success"]:
+                        logger.info(f"✅ Lawyer notifications sent: {notification_result['notifications_sent']}/{notification_result['total_lawyers']}")
+                    else:
+                        logger.error(f"❌ Failed to send lawyer notifications: {notification_result.get('error', 'Unknown error')}")
+                        
+                except Exception as notification_error:
+                    logger.error(f"❌ Error sending lawyer notifications: {str(notification_error)}")
+                    # Don't fail the entire flow if notifications fail
+                    
             except Exception as save_error:
                 logger.error(f"❌ Error saving lead: {str(save_error)}")
 

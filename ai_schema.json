@@ -80,28 +80,22 @@
             "penal": "Penal",
             "criminal": "Penal",
             "crime": "Penal",
-            "civil": "Civil",
-            "civel": "Civil",
-            "trabalhista": "Trabalhista",
-            "trabalho": "Trabalhista",
-            "trabalhador": "Trabalhista",
-            "família": "Família",
-            "familia": "Família",
-            "divórcio": "Família",
-            "divorcio": "Família",
-            "casamento": "Família",
-            "empresarial": "Empresarial",
-            "empresa": "Empresarial",
-            "comercial": "Empresarial"
+            "saude": "Saúde Liminar",
+            "saúde": "Saúde Liminar",
+            "liminar": "Saúde Liminar",
+            "saude liminar": "Saúde Liminar",
+            "saúde liminar": "Saúde Liminar",
+            "health": "Saúde Liminar",
+            "injunction": "Saúde Liminar"
           }
         },
-        "error_message": "Por favor, escolha uma das áreas jurídicas: Penal, Civil, Trabalhista, Família ou Empresarial."
+        "error_message": "Por favor, escolha uma das áreas jurídicas: Penal ou Saúde Liminar."
       },
       {
         "id": 3,
         "field": "situation",
         "question": "Ok {user_name}, entendi que se trata de uma questão em {area}. Você poderia me descrever brevemente o que aconteceu? Assim consigo direcionar melhor sua demanda.",
-        "validation": {
+        "question": "Em qual área jurídica você precisa de ajuda?\n\n• Penal\n• Saúde Liminar",
           "min_length": 5,
           "required": true,
           "type": "description"

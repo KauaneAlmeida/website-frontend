@@ -16,6 +16,7 @@ from app.services.baileys_service import (
     get_baileys_status,
     baileys_service
 )
+from app.services.lawyer_notification_service import lawyer_notification_service
 
 # Logging
 logger = logging.getLogger(__name__)
@@ -161,6 +162,30 @@ async def whatsapp_status():
         return {
             "service": "baileys_whatsapp",
             "status": "error",
+            "error": str(e)
+        }
+
+
+@router.post("/whatsapp/test-lawyer-notifications")
+async def test_lawyer_notifications():
+    """
+    Test endpoint to verify lawyer notification system.
+    """
+    try:
+        logger.info("🧪 Testing lawyer notification system")
+        result = await lawyer_notification_service.test_lawyer_notifications()
+        
+        return {
+            "status": "success",
+            "message": "Lawyer notification test completed",
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error testing lawyer notifications: {str(e)}")
+        return {
+            "status": "error",
+            "message": "Failed to test lawyer notifications",
             "error": str(e)
         }
 
