@@ -8,7 +8,7 @@ Uses batch loading (load_table_from_json) which is compatible with BigQuery Sand
 import os
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from google.cloud import bigquery
 from google.cloud.exceptions import GoogleCloudError
 
@@ -138,7 +138,7 @@ class BigQueryService:
             print(f"❌ ERROR: {error_msg}")
             return False
     
-    def inserir_multiplos_eventos(self, eventos: list[Dict[str, Any]]) -> bool:
+    def inserir_multiplos_eventos(self, eventos: List[Dict[str, Any]]) -> bool:
         """
         Insert multiple lead events in a single batch operation.
         
