@@ -11,7 +11,6 @@ services:
       - NODE_ENV=production
       - PYTHONUNBUFFERED=1
       - WHATSAPP_BOT_URL=http://law_firm_whatsapp_bot:3000
-      - FIREBASE_CREDENTIALS=/firebase-key.json
     env_file:
       - .env
     volumes:
@@ -47,7 +46,6 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
-      - FIREBASE_CREDENTIALS=/firebase-key.json
       - FASTAPI_WEBHOOK_URL=http://law_firm_backend:8000/api/v1/whatsapp/webhook
     env_file:
       - .env

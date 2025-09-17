@@ -1,9 +1,9 @@
 """
-Firebase Service (Simplified + Adjusted)
+Firebase Service (Adjusted)
 
 Este módulo gerencia a integração com o Firebase Admin SDK e operações no Firestore.
-Agora o backend usa **apenas** o Secret File:
- - Render (Secret File montado em /etc/secrets/firebase-key.json)
+Agora o backend usa **apenas** a variável de ambiente FIREBASE_CREDENTIALS,
+que pode apontar para um caminho relativo (ex: firebase-key.json) ou absoluto (/firebase-key.json).
 """
 
 import os
@@ -24,8 +24,7 @@ _firestore_client = None
 
 def initialize_firebase():
     """
-    Inicializa o Firebase Admin SDK a partir do Secret File.
-    Caminho esperado: /etc/secrets/firebase-key.json
+    Inicializa o Firebase Admin SDK a partir do caminho definido em FIREBASE_CREDENTIALS.
     """
     global _firebase_app, _firestore_client
 
@@ -34,15 +33,19 @@ def initialize_firebase():
         return
 
     try:
-        cred_path = "/etc/secrets/firebase-key.json"
+        cred_path = os.getenv("FIREBASE_CREDENTIALS", "/firebase-key.json")
+
+        if not os.path.isabs(cred_path):
+            # Se não for absoluto, usa o diretório atual como base
+            cred_path = os.path.join(os.getcwd(), cred_path)
 
         if not os.path.exists(cred_path):
             raise ValueError(
                 f"Arquivo de credenciais do Firebase não encontrado em {cred_path}. "
-                "Verifique se o Secret File está configurado corretamente no Render."
+                "Verifique se o arquivo existe e se FIREBASE_CREDENTIALS está configurado corretamente."
             )
 
-        logger.info(f"🔥 Inicializando Firebase usando Secret File: {cred_path}")
+        logger.info(f"🔥 Inicializando Firebase usando credenciais: {cred_path}")
         cred = credentials.Certificate(cred_path)
 
         _firebase_app = firebase_admin.initialize_app(cred)
@@ -79,7 +82,7 @@ def get_firestore_client():
 async def get_conversation_flow() -> Dict[str, Any]:
     """
     Busca o fluxo de conversa do Firestore.
-    Se não existir, cria um fluxo default no formato simples (id + question).
+    Se não existir, cria um fluxo default.
     """
     try:
         db = get_firestore_client()
@@ -125,8 +128,7 @@ async def get_conversation_flow() -> Dict[str, Any]:
                 })
 
         # Garante que tenha o passo 0
-        has_step_0 = any(step.get("id") == 0 for step in normalized_steps)
-        if not has_step_0:
+        if not any(step.get("id") == 0 for step in normalized_steps):
             normalized_steps.insert(0, {
                 "id": 0,
                 "question": "Olá! Para garantir que registramos corretamente suas informações, vamos começar do início. Tudo bem?"
@@ -236,7 +238,7 @@ async def get_firebase_service_status() -> Dict[str, Any]:
         db = get_firestore_client()
         try:
             test_collection = db.collection("conversation_flows").limit(1)
-            docs = test_collection.get()
+            _ = test_collection.get()
             logger.info("✅ Firebase Firestore connection test successful")
         except Exception as read_error:
             logger.error(f"❌ Firebase Firestore connection test failed: {str(read_error)}")
@@ -246,7 +248,7 @@ async def get_firebase_service_status() -> Dict[str, Any]:
             "service": "firebase_service",
             "status": "active",
             "firestore_connected": True,
-            "credentials_source": "secret_file",
+            "credentials_source": os.getenv("FIREBASE_CREDENTIALS", "firebase-key.json"),
             "collections": ["conversation_flows", "leads", "user_sessions", "_health_check"],
             "message": "Firebase Firestore is operational",
             "timestamp": datetime.now().isoformat()

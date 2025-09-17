@@ -577,9 +577,14 @@ class IntelligentHybridOrchestrator:
 
             # Save lead data
             try:
-                lead_id = await save_lead_data({"answers": answers})
+                await save_lead_data({"answers": answers})
                 logger.info(f"💾 Lead saved for session {session_id}: {len(answers)} answers")
                 
+                # Prepare data BEFORE sending notifications
+                user_name = lead_data.get("name", lead_data.get("step_1", lead_data.get("step_0", "Cliente")))
+                area = lead_data.get("area_of_law", lead_data.get("step_2", "não informada"))
+                situation_full = lead_data.get("situation", lead_data.get("step_3", "não detalhada"))
+
                 # 🚨 NEW: Send notifications to lawyers
                 try:
                     notification_result = await lawyer_notification_service.notify_lawyers_of_new_lead(
@@ -612,12 +617,11 @@ class IntelligentHybridOrchestrator:
                 situation += "..."
 
             # Create the final WhatsApp message with the exact format requested
-            final_whatsapp_message = f"""Olá {user_name}! 👋
+            final_whatsapp_message = f"""Olá, Obrigado pelas informações {user_name}! 👋
 
 Recebemos sua solicitação através do nosso site e estamos aqui para ajudá-lo com questões jurídicas.
 
-Nossa equipe especializada está pronta para analisar seu caso. 
-Vamos continuar nossa conversa aqui no WhatsApp para maior comodidade. 🤝
+Um de nossos advogados especializados na área já vai entrar em contato diretamente com você no WhatsApp. 🤝
 
 📄 Resumo do caso enviado pelo cliente:
 

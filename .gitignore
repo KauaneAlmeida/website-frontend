@@ -51,6 +51,7 @@ firebase-key.json
 firebase-debug.log
 .firebase/
 serviceAccountKey.json
+service-account.json
 
 # WhatsApp Baileys
 whatsapp_session/

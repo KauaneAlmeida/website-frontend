@@ -6,6 +6,7 @@ Handles assignment logic, Firebase storage, and WhatsApp notifications.
 """
 
 import logging
+import os
 import uuid
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
@@ -21,7 +22,7 @@ class LeadAssignmentService:
     """Service for managing lead assignments to lawyers."""
     
     def __init__(self):
-        self.base_url = "https://law-firm-backend-2iu2.onrender.com"  # Update with your actual domain
+           self.base_url = os.getenv("BASE_URL", "http://localhost:8000") # Update with your actual domain
     
     async def create_lead_with_assignment_links(
         self,
@@ -207,7 +208,7 @@ class LeadAssignmentService:
             clean_phone = f"55{clean_phone}"
         
         # Create message
-        message = f"Hello {lead_name}, I am {lawyer_name} and I will take care of your {category} case. Situation: {situation[:100]}{'...' if len(situation) > 100 else ''}"
+        message = f"Olá {lead_name}, Eu sou {lawyer_name} e eu vou cuidar do seu {category} caso. Situação: {situation[:100]}{'...' if len(situation) > 100 else ''}"
         
         # URL encode the message
         import urllib.parse
@@ -265,17 +266,16 @@ class LeadAssignmentService:
                     assignment_link = f"{self.base_url}/api/v1/leads/{lead_id}/assign/{lawyer_id}"
                     
                     # Create personalized notification message
-                    notification_message = f"""🚨 New lead received!
+                    notification_message = f"""🚨 Novo cliente recebido!
 
-Name: {lead_name}
-Phone: {lead_phone}
-Category: {category}
-Situation: {situation[:200]}{'...' if len(situation) > 200 else ''}
+Nome: {lead_name}
+Telefone: {lead_phone}
+Área jurídica: {category}
+Situação: {situation[:200]}{'...' if len(situation) > 200 else ''}
 
-👉 Click here if you will take this case:
+👉 Clique no link abaixo se você deseja assumir este caso:
 {assignment_link}
-
-⚠️ First lawyer to click gets the case!"""
+"""
                     
                     # Format lawyer phone for WhatsApp
                     whatsapp_number = format_lawyer_phone_for_whatsapp(lawyer["phone"])
@@ -333,7 +333,7 @@ Situation: {situation[:200]}{'...' if len(situation) > 200 else ''}
     ) -> bool:
         """Send confirmation message to lawyer who took the case."""
         try:
-            confirmation_message = f"✅ You have successfully taken this lead: {lead_name}\n\nLead ID: {lead_id}\n\nPlease contact the client as soon as possible."
+            confirmation_message = f"✅ Você assumiu com sucesso este cliente: {lead_name}\n\nLead ID: {lead_id}\n\nPor favor, entre em contato com o cliente o quanto antes."
             
             whatsapp_number = format_lawyer_phone_for_whatsapp(lawyer_info["phone"])
             success = await baileys_service.send_whatsapp_message(
@@ -362,7 +362,7 @@ Situation: {situation[:200]}{'...' if len(situation) > 200 else ''}
         """Notify other lawyers that the case has been taken."""
         try:
             lawyers = get_lawyers_for_notification()
-            notification_message = f"ℹ️ The lead '{lead_name}' has been assigned to {assigned_lawyer_name}."
+            notification_message = f"ℹ️ O cliente '{lead_name}' foi atribuido por {assigned_lawyer_name}."
             
             for lawyer in lawyers:
                 # Skip the lawyer who took the case
