@@ -10,13 +10,13 @@ from typing import List, Dict, Any
 # Lawyer contact configuration
 LAWYERS = [
     {
-        "name": "Advogada Maria Fernanda",
-        "phone": "555195690381",
+        "name": "Advogada Isla",
+        "phone": "5511918368812",
         "specialties": ["Penal", "Saúde Liminar"]
     },
     {
-        "name": "Advogado Ricardo", 
-        "phone": "5511959840099",
+        "name": "Advogado Raphael", 
+        "phone": "5511964994519",
         "specialties": ["Penal", "Saúde Liminar"]
     },
     {

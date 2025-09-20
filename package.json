@@ -1,17 +1,18 @@
 {
-  "name": "node-starter",
+  "name": "whatsapp-bot",
   "private": true,
-  "main": "whatsapp_baileys.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node whatsapp_baileys.js",
-    "whatsapp": "node whatsapp_baileys.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js"
   },
   "dependencies": {
+    "@google-cloud/storage": "^7.17.1",
     "@whiskeysockets/baileys": "^6.7.19",
     "express": "^4.21.2",
     "node-fetch": "^3.3.2",
     "qrcode": "^1.5.4",
-    "qrcode-terminal": "^0.12.0"
+    "qrcode-terminal": "^0.12.0",
+    "@hapi/boom": "^10.0.1",
+    "pino": "^9.4.0"
   }
 }

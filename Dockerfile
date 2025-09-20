@@ -1,42 +1,38 @@
-FROM python:3.11-slim
+# Imagem base Node.js
+FROM node:20-alpine
 
-# Instalar dependências do sistema só uma vez (cacheia bem)
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    gcc \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Instalar curl (para healthcheck) e git (se precisar para dependências npm)
+RUN apk add --no-cache curl git
 
-# Criar diretório da app
+# Criar diretório da aplicação
 WORKDIR /app
 
 # Criar usuário não-root
-RUN adduser --disabled-password --gecos '' appuser
+RUN addgroup -g 1001 -S appuser && \
+    adduser -S -D -H -u 1001 -h /app -s /sbin/nologin -G appuser appuser
 
-# Copiar requirements e instalar
-COPY requirements.txt /tmp/requirements.txt
-RUN pip install --upgrade pip && pip install --no-cache-dir -r /tmp/requirements.txt
+# Copiar package.json e package-lock.json
+COPY package*.json ./
 
-# Copiar aplicação
-COPY app/ ./app/
+# Instalar dependências
+RUN npm install --omit=dev && npm cache clean --force
 
-# 👉 Copiar o arquivo de credenciais do Firebase para a raiz do container
-COPY firebase-key.json /firebase-key.json
+# Copiar o restante do código
+COPY . .
 
-# Dar permissão
-RUN chown -R appuser:appuser /app /firebase-key.json
+# Dar permissão ao usuário
+RUN mkdir -p /app/whatsapp_session && \
+    chown -R appuser:appuser /app
 
 # Trocar para usuário não-root
 USER appuser
 
-# Expor porta
-EXPOSE 8000
+# Expor a porta que o Cloud Run usa (8080)
+EXPOSE 8080
 
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-  CMD curl -f http://localhost:8000/health || exit 1
+# Healthcheck opcional (ping no endpoint /health)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+  CMD curl -f http://localhost:${PORT:-8080}/health || exit 1
 
-# Iniciar FastAPI
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-
-
+# Comando para rodar o bot
+CMD ["node", "whatsapp_baileys.js"]

@@ -1,12 +1,13 @@
 """
-Firebase Service (Adjusted)
+Firebase Service (com Secret Manager)
 
 Este módulo gerencia a integração com o Firebase Admin SDK e operações no Firestore.
-Agora o backend usa **apenas** a variável de ambiente FIREBASE_CREDENTIALS,
-que pode apontar para um caminho relativo (ex: firebase-key.json) ou absoluto (/firebase-key.json).
+Agora o backend usa **exclusivamente** a variável de ambiente FIREBASE_KEY,
+que deve conter o JSON completo da service account (via Secret Manager no Cloud Run).
 """
 
 import os
+import json
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
@@ -24,7 +25,7 @@ _firestore_client = None
 
 def initialize_firebase():
     """
-    Inicializa o Firebase Admin SDK a partir do caminho definido em FIREBASE_CREDENTIALS.
+    Inicializa o Firebase Admin SDK a partir da variável de ambiente FIREBASE_KEY.
     """
     global _firebase_app, _firestore_client
 
@@ -33,21 +34,15 @@ def initialize_firebase():
         return
 
     try:
-        cred_path = os.getenv("FIREBASE_CREDENTIALS", "/firebase-key.json")
+        firebase_key = os.getenv("FIREBASE_KEY")
+        if not firebase_key:
+            raise ValueError("Variável de ambiente FIREBASE_KEY não encontrada.")
 
-        if not os.path.isabs(cred_path):
-            # Se não for absoluto, usa o diretório atual como base
-            cred_path = os.path.join(os.getcwd(), cred_path)
+        # Converte o JSON que veio da env em dict
+        firebase_credentials = json.loads(firebase_key)
+        cred = credentials.Certificate(firebase_credentials)
 
-        if not os.path.exists(cred_path):
-            raise ValueError(
-                f"Arquivo de credenciais do Firebase não encontrado em {cred_path}. "
-                "Verifique se o arquivo existe e se FIREBASE_CREDENTIALS está configurado corretamente."
-            )
-
-        logger.info(f"🔥 Inicializando Firebase usando credenciais: {cred_path}")
-        cred = credentials.Certificate(cred_path)
-
+        logger.info("🔥 Inicializando Firebase com credenciais do Secret Manager")
         _firebase_app = firebase_admin.initialize_app(cred)
         _firestore_client = firestore.client()
         logger.info("✅ Firebase inicializado com sucesso")
@@ -80,10 +75,6 @@ def get_firestore_client():
 # Conversation Flow
 # --------------------------------------------------------------------------
 async def get_conversation_flow() -> Dict[str, Any]:
-    """
-    Busca o fluxo de conversa do Firestore.
-    Se não existir, cria um fluxo default.
-    """
     try:
         db = get_firestore_client()
         flow_ref = db.collection("conversation_flows").document("law_firm_intake")
@@ -110,10 +101,10 @@ async def get_conversation_flow() -> Dict[str, Any]:
             logger.info("✅ Fluxo de conversa padrão criado")
             return default_flow
 
-        # 🔥 Normaliza os steps
         flow_data = flow_doc.to_dict()
         steps = flow_data.get("steps", [])
 
+        # Normaliza steps
         normalized_steps = []
         for idx, step in enumerate(steps, start=1):
             if isinstance(step, dict):
@@ -127,7 +118,6 @@ async def get_conversation_flow() -> Dict[str, Any]:
                     "question": str(step),
                 })
 
-        # Garante que tenha o passo 0
         if not any(step.get("id") == 0 for step in normalized_steps):
             normalized_steps.insert(0, {
                 "id": 0,
@@ -135,11 +125,10 @@ async def get_conversation_flow() -> Dict[str, Any]:
             })
 
         flow_data["steps"] = normalized_steps
-        
-        # Garante que tenha completion_message
+
         if "completion_message" not in flow_data:
             flow_data["completion_message"] = "Obrigado! Suas informações foram registradas e entraremos em contato em breve."
-        
+
         return flow_data
 
     except Exception as e:
@@ -248,7 +237,7 @@ async def get_firebase_service_status() -> Dict[str, Any]:
             "service": "firebase_service",
             "status": "active",
             "firestore_connected": True,
-            "credentials_source": os.getenv("FIREBASE_CREDENTIALS", "firebase-key.json"),
+            "credentials_source": "env:FIREBASE_KEY",
             "collections": ["conversation_flows", "leads", "user_sessions", "_health_check"],
             "message": "Firebase Firestore is operational",
             "timestamp": datetime.now().isoformat()
