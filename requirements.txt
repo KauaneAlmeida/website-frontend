@@ -5,6 +5,8 @@ uvicorn[standard]==0.23.2
 # Manipulação de variáveis de ambiente
 python-dotenv==1.0.0
 
+fastapi-cors==0.0.6
+
 # Logging e validação
 pydantic==1.10.13
 

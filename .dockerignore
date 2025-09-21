@@ -20,10 +20,6 @@ whatsapp_session/
 *.log
 logs/
 
-# Git
-.git/
-.gitignore
-
 # IDE
 .vscode/
 .idea/
@@ -58,7 +54,3 @@ docker-compose*.yml
 # Environment files (will be mounted)
 .env
 .env.*
-
-# Documentation
-README.md
-*.md

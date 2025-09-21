@@ -22,7 +22,7 @@ class LeadAssignmentService:
     """Service for managing lead assignments to lawyers."""
     
     def __init__(self):
-           self.base_url = os.getenv("BASE_URL", "http://localhost:8000") # Update with your actual domain
+           self.base_url = os.getenv("BASE_URL", "https://law-firm-backend-936902782519.us-central1.run.app")
     
     async def create_lead_with_assignment_links(
         self,

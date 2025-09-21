@@ -1,18 +1,20 @@
 {
-  "name": "whatsapp-bot",
-  "private": true,
-  "main": "index.js",
+  "name": "whatsapp-baileys-bot",
+  "version": "1.0.0",
+  "main": "whatsapp_baileys.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node whatsapp_baileys.js"
   },
   "dependencies": {
-    "@google-cloud/storage": "^7.17.1",
-    "@whiskeysockets/baileys": "^6.7.19",
-    "express": "^4.21.2",
-    "node-fetch": "^3.3.2",
-    "qrcode": "^1.5.4",
-    "qrcode-terminal": "^0.12.0",
-    "@hapi/boom": "^10.0.1",
-    "pino": "^9.4.0"
+    "@whiskeysockets/baileys": "6.7.8",
+    "@hapi/boom": "10.0.1",
+    "express": "4.19.2",
+    "firebase-admin": "12.1.0",
+    "node-fetch": "3.3.2",
+    "qrcode": "1.5.3",
+    "qrcode-terminal": "0.12.0"
+  },
+  "engines": {
+    "node": "18"
   }
 }

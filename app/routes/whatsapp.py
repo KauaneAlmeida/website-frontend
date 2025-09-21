@@ -1,13 +1,8 @@
-"""
-WhatsApp Routes + BigQuery Logging
-
-Handles WhatsApp webhook events, integrates with Intelligent Orchestrator,
-and logs processed messages into BigQuery for deduplication & analytics.
-"""
-
 import logging
+import os
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 
 from app.services.orchestration_service import intelligent_orchestrator
 from app.services.baileys_service import (
@@ -16,7 +11,8 @@ from app.services.baileys_service import (
     baileys_service
 )
 from app.services.lawyer_notification_service import lawyer_notification_service
-from app.services.bigquery_service import bigquery_service
+# >>> BigQuery removido
+# from app.services.bigquery_service import bigquery_service
 
 # Logging
 logger = logging.getLogger(__name__)
@@ -24,12 +20,31 @@ logger = logging.getLogger(__name__)
 # FastAPI router
 router = APIRouter()
 
+# Token de verificação para o webhook do WhatsApp
+# Defina também no Cloud Run: WHATSAPP_VERIFY_TOKEN="s3nh@-webhook-2025-XYz"
+VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN", "s3nh@-webhook-2025-XYz")
+
+
+@router.get("/whatsapp/webhook")
+async def verify_whatsapp_webhook(request: Request):
+    """
+    Handler GET para a Meta verificar o webhook do WhatsApp.
+    """
+    params = request.query_params
+    mode = params.get("hub.mode")
+    token = params.get("hub.verify_token")
+    challenge = params.get("hub.challenge")
+
+    if mode == "subscribe" and token == VERIFY_TOKEN:
+        return PlainTextResponse(challenge or "")
+    return PlainTextResponse("Forbidden", status_code=403)
+
 
 @router.post("/whatsapp/webhook")
 async def whatsapp_webhook(request: Request):
     """
     Webhook endpoint for receiving WhatsApp messages via Baileys.
-    Logs into BigQuery and avoids duplicates.
+    (BigQuery removido)
     """
     try:
         payload = await request.json()
@@ -45,17 +60,6 @@ async def whatsapp_webhook(request: Request):
             logger.warning("⚠️ Invalid webhook payload - missing message, phone number, or messageId")
             return {"status": "error", "message": "Invalid payload"}
 
-        # Verifica se a mensagem já foi registrada no BigQuery
-        try:
-            stats = bigquery_service.obter_estatisticas_tabela()
-            logger.debug(f"BigQuery stats: {stats}")
-        except Exception:
-            stats = None
-
-        # (Opcional) — aqui você poderia implementar uma query em BigQuery
-        # para checar se message_id já existe. Por simplicidade,
-        # vamos apenas registrar sempre e deixar o controle por análise posterior.
-
         logger.info(f"🎯 Processing WhatsApp message {message_id} from {phone_number}: {message_text[:50]}...")
 
         # Process via Intelligent Orchestrator
@@ -67,14 +71,6 @@ async def whatsapp_webhook(request: Request):
         )
 
         ai_response = response.get("response", "")
-
-        # Salva evento no BigQuery (message como lead_id e phone_number como advogado_id simbólico)
-        bigquery_service.inserir_evento_lead(
-            lead_id=message_id,
-            advogado_id=phone_number,
-            foi_notificado=True,
-            respondeu=bool(ai_response)
-        )
 
         if ai_response:
             logger.info(f"🤖 Sending AI response to {phone_number}")

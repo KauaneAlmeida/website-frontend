@@ -268,7 +268,7 @@ cd app
 uvicorn main:app --reload --port 8000
 
 # WhatsApp bot only
-node whatsapp_baileys.js
+node index.js
 
 # Full stack
 docker compose up --build
