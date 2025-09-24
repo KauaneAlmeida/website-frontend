@@ -185,9 +185,9 @@ async def assign_lead_to_lawyer(lead_id: str, lawyer_id: str):
             <body>
                 <div class="container">
                     <div class="error-icon">{error_icon}</div>
-                    <h1 class="title">Assignment Not Possible</h1>
+                    <h1 class="title">Atribuição não é possível</h1>
                     <p class="message">{result['message']}</p>
-                    {f'<div class="info-box"><strong>Assigned to:</strong> {result.get("assigned_to", "N/A")}</div>' if result.get("assigned_to") else ''}
+                    {f'<div class="info-box"><strong>Atribuído por:</strong> {result.get("assigned_to", "N/A")}</div>' if result.get("assigned_to") else ''}
                     <div class="footer">
                         <small>Law Firm Assignment System</small>
                     </div>

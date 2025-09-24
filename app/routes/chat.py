@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import JSONResponse
 import logging
 
 from app.models.request import ChatRequest
@@ -36,10 +37,19 @@ async def chat_endpoint(request: ChatRequest):
         )
 
         # Cria a resposta
-        response = ChatResponse(reply=ai_reply)
+        response_data = ChatResponse(reply=ai_reply)
         logger.info(f"Sending reply: {response.reply}")
 
-        return response
+        # Return with explicit CORS headers
+        return JSONResponse(
+            content=response_data.dict(),
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization"
+            }
+        )
 
     except HTTPException:
         raise
@@ -59,7 +69,7 @@ async def chat_status():
     try:
         ai_status = await get_ai_service_status()
 
-        return {
+        response_data = {
             "service": "chat",
             "status": "active" if ai_status["status"] in ["active", "degraded"] else "configuration_required",
             "message": "Chat service is running with LangChain + Gemini integration",
@@ -78,6 +88,16 @@ async def chat_status():
                 "clear_memory": "/api/v1/chat/clear-memory"
             }
         }
+        
+        return JSONResponse(
+            content=response_data,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization"
+            }
+        )
 
     except Exception as e:
         logger.error(f"Error getting chat status: {str(e)}")
@@ -94,7 +114,17 @@ async def clear_memory(session_id: str):
     """
     try:
         clear_conversation_memory(session_id)
-        return {"message": f"Conversation memory cleared for session {session_id}"}
+        response_data = {"message": f"Conversation memory cleared for session {session_id}"}
+        
+        return JSONResponse(
+            content=response_data,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization"
+            }
+        )
     except Exception as e:
         logger.error(f"Error clearing conversation memory: {str(e)}")
         raise HTTPException(

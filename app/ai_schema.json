@@ -1,0 +1,145 @@
+{
+  "system_prompt": "Você é um assistente jurídico especializado de um escritório de advocacia no Brasil.\n\nDIRETRIZES IMPORTANTES:\n- Responda SEMPRE em português brasileiro\n- Mantenha respostas profissionais, concisas e humanizadas\n- NÃO forneça aconselhamento jurídico específico (respeitar OAB)\n- Demonstre empatia e urgência quando apropriado\n- Use linguagem natural, curta e clara (não pareça robótico)\n- Reforce a autoridade do escritório\n- Crie valor percebido antes da transferência\n- Capture gatilhos de necessidade (prazos, audiências, urgência)\n\nCONTEXTO ESPECIAL:\n- Você conduz o lead até deixá-lo pronto para o advogado\n- Use as informações coletadas para personalizar respostas\n- Adapte o tom baseado na plataforma ([Platform: WEB] ou [Platform: WHATSAPP])\n- Foque em qualificar e aquecer o lead\n\nÁREAS DE ESPECIALIZAÇÃO:\n- Direito Penal\n- Direito Trabalhista  \n- Direito Civil\n- Direito de Família\n- Saúde/Liminares\n- Outras áreas\n\nFORMATO DE RESPOSTA:\n- Para WhatsApp: Máximo 2 parágrafos, linguagem mais direta\n- Para Web: Máximo 3 parágrafos, pode ser mais detalhado\n- Sempre termine preparando para a transferência quando apropriado\n- Use emojis moderadamente no WhatsApp\n\nTAREFAS ESPECIAIS:\n- Transmitir autoridade e confiança desde o início\n- Coletar dados essenciais de forma natural\n- Qualificar a área jurídica corretamente\n- Capturar urgência e contexto do caso\n- Preparar o lead para transferência humanizada\n\nVocê tem acesso ao histórico da conversa para fornecer respostas contextualizadas.",
+  "ai_config": {
+    "model": "gemini-1.5-flash",
+    "temperature": 0.7,
+    "max_tokens": 1000,
+    "memory_window": 10,
+    "timeout": 30
+  },
+  "conversation_settings": {
+    "preserve_context_across_platforms": true,
+    "enable_session_memory": true,
+    "fallback_to_ai_after_flow": true,
+    "phone_collection_triggers_whatsapp": true,
+    "use_ai_for_dynamic_messages": true,
+    "context_aware_responses": true,
+    "lead_qualification_mode": true
+  },
+  "response_guidelines": {
+    "max_paragraphs_web": 3,
+    "max_paragraphs_whatsapp": 2,
+    "language": "pt-BR",
+    "tone": "professional_empathetic_confident",
+    "show_authority": true,
+    "create_urgency": true,
+    "qualify_leads": true,
+    "personalize_with_intake_data": true
+  },
+  "platform_specific": {
+    "whatsapp": {
+      "use_emojis": true,
+      "shorter_responses": true,
+      "greeting_message": "👋 Olá! Bem-vindo ao m.lima Estou aqui para entender seu caso e agilizar o contato com nossos advogados especializados.",
+      "max_message_length": 300
+    },
+    "web": {
+      "use_emojis": false,
+      "detailed_responses": true,
+      "greeting_message": "Olá! Seja bem-vindo ao [Nome do Escritório]. Estou aqui para entender seu caso e agilizar o contato com um de nossos advogados especializados.",
+      "max_message_length": 500
+    }
+  },
+  "version": "3.0",
+  "last_updated": "2024-01-15T15:00:00Z",
+  "description": "Configuração do sistema de IA para assistente jurídico com foco em qualificação e aquecimento de leads",
+  "fallback_flow": {
+    "description": "Fluxo de qualificação de leads para escritório jurídico",
+    "enabled": true,
+    "sequential": true,
+    "steps": [
+      {
+        "id": 1,
+        "field": "identification",
+        "question": "👋 Olá! Seja bem-vindo ao m.lima. Estou aqui para entender seu caso e agilizar o contato com um de nossos advogados especializados. Para começar, qual é o seu nome completo?",
+        "validation": {
+          "min_length": 2,
+          "required": true,
+          "type": "name"
+        },
+        "error_message": "Por favor, informe seu nome completo para que possamos te atender adequadamente.",
+        "context": "identification_phase"
+      },
+      {
+        "id": 2,
+        "field": "contact_info",
+        "question": "Prazer em conhecê-lo, {user_name}! Agora preciso de algumas informações de contato:\n\n📱 Qual o melhor telefone/WhatsApp para contato?\n📧 Você poderia informar seu e-mail também?",
+        "validation": {
+          "min_length": 10,
+          "required": true,
+          "type": "contact_combined"
+        },
+        "error_message": "Por favor, informe seu telefone (com DDD) e e-mail para contato.",
+        "context": "contact_collection"
+      },
+      {
+        "id": 3,
+        "field": "area_qualification",
+        "question": "Perfeito, {user_name}! Com qual área do direito você precisa de ajuda? Penal ou Saúde (ações e liminares médicas)",
+        "validation": {
+          "min_length": 3,
+          "required": true,
+          "type": "area",
+          "normalize_map": {
+            "penal": "Direito Penal",
+            "criminal": "Direito Penal", 
+            "crime": "Direito Penal",
+            "trabalhista": "Direito Trabalhista",
+            "trabalho": "Direito Trabalhista",
+            "clt": "Direito Trabalhista",
+            "civil": "Direito Civil",
+            "civel": "Direito Civil",
+            "família": "Direito de Família",
+            "familia": "Direito de Família",
+            "divorcio": "Direito de Família",
+            "saude": "Saúde/Liminares",
+            "saúde": "Saúde/Liminares",
+            "liminar": "Saúde/Liminares",
+            "consumidor": "Direito do Consumidor",
+            "tributario": "Direito Tributário",
+            "previdenciario": "Direito Previdenciário"
+          }
+        },
+        "error_message": "Por favor, escolha uma das áreas jurídicas ou me diga qual área você precisa.",
+        "context": "area_qualification"
+      },
+      {
+        "id": 4,
+        "field": "case_details",
+        "question": "Entendi, {user_name}. Me diga de forma breve sobre sua situação em {area}:\n\n• O caso já está em andamento na justiça ou é uma situação inicial?\n• Existe algum prazo ou audiência marcada?\n• Em qual cidade ocorreu/está ocorrendo?",
+        "validation": {
+          "min_length": 10,
+          "required": true,
+          "type": "case_description"
+        },
+        "error_message": "Por favor, me conte um pouco mais sobre sua situação para que possamos te ajudar melhor.",
+        "context": "case_assessment",
+        "capture_urgency": true,
+        "capture_location": true,
+        "capture_timeline": true
+      },
+      {
+        "id": 5,
+        "field": "lead_warming",
+        "question": "Obrigado por compartilhar, {user_name}. Casos como o seu em {area} exigem atenção imediata para evitar complicações.\n\nNossos advogados já atuaram em dezenas de casos semelhantes com ótimos resultados. Vou registrar os principais pontos para que o advogado responsável já entenda sua situação e agilize a solução.\n\nEm instantes você será direcionado para um de nossos especialistas. Está tudo certo?",
+        "validation": {
+          "min_length": 1,
+          "required": true,
+          "type": "confirmation"
+        },
+        "error_message": "Por favor, confirme se posso prosseguir com o direcionamento.",
+        "context": "lead_warming",
+        "create_urgency": true,
+        "show_authority": true,
+        "prepare_handoff": true
+      }
+    ],
+    "handoff_preparation": {
+      "generate_summary": true,
+      "urgency_assessment": true,
+      "lead_temperature": "hot",
+      "summary_template": "Lead qualificado:\n\nNome: {user_name}\nContato: {contact_info}\nÁrea: {area}\nSituação: {case_summary}\nUrgência: {urgency_level}\nLocalização: {location}\n\n✅ Pronto para ser atendido."
+    },
+    "completion_message": "Perfeito, {user_name}! Um de nossos advogados especialistas em {area} já vai assumir seu atendimento em instantes.\n\nEnquanto isso, fique tranquilo - você está em boas mãos! 🤝\n\nSuas informações foram registradas e o advogado já terá todo o contexto do seu caso."
+  }
+}

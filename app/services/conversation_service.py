@@ -34,6 +34,78 @@ class ConversationManager:
         self.flow_cache = None
         self.cache_timestamp = None
 
+    def _format_brazilian_phone(self, phone_clean: str) -> str:
+        """
+        Format Brazilian phone number correctly for WhatsApp.
+        Handles all Brazilian area codes (DDDs) properly.
+        """
+        try:
+            # Remove country code if already present
+            if phone_clean.startswith("55"):
+                phone_clean = phone_clean[2:]
+            
+            # Handle different input formats
+            if len(phone_clean) == 10:
+                # Format: DDNNNNNNNNN (10 digits - old format without 9th digit)
+                ddd = phone_clean[:2]
+                number = phone_clean[2:]
+                
+                # Add 9th digit for mobile numbers (all modern Brazilian mobiles start with 9)
+                if number[0] in ['6', '7', '8', '9']:
+                    # Already a mobile number, add 9th digit if missing
+                    if len(number) == 8:
+                        number = f"9{number}"
+                
+                return f"55{ddd}{number}"
+                
+            elif len(phone_clean) == 11:
+                # Format: DDNNNNNNNNN (11 digits - already has 9th digit)
+                ddd = phone_clean[:2]
+                number = phone_clean[2:]
+                return f"55{ddd}{number}"
+                
+            elif len(phone_clean) == 13:
+                # Format: 55DDNNNNNNNNN (already formatted)
+                return phone_clean
+                
+            elif len(phone_clean) == 12:
+                # Format: 55DDNNNNNNN (missing 9th digit)
+                if phone_clean.startswith("55"):
+                    ddd = phone_clean[2:4]
+                    number = phone_clean[4:]
+                    
+                    # Add 9th digit for mobile numbers
+                    if number[0] in ['6', '7', '8', '9'] and len(number) == 8:
+                        number = f"9{number}"
+                        
+                    return f"55{ddd}{number}"
+                else:
+                    # 12 digits without country code - probably has extra digit
+                    ddd = phone_clean[:2]
+                    number = phone_clean[2:]
+                    return f"55{ddd}{number}"
+            
+            else:
+                # Fallback - try to guess format
+                logger.warning(f"⚠️ Unexpected phone format: {phone_clean} (length: {len(phone_clean)})")
+                
+                if len(phone_clean) >= 10:
+                    ddd = phone_clean[:2]
+                    number = phone_clean[2:]
+                    
+                    # Ensure mobile format
+                    if len(number) == 8 and number[0] in ['6', '7', '8', '9']:
+                        number = f"9{number}"
+                    
+                    return f"55{ddd}{number}"
+                
+                # Last resort
+                return f"55{phone_clean}"
+                
+        except Exception as e:
+            logger.error(f"❌ Error formatting phone number {phone_clean}: {str(e)}")
+            return f"55{phone_clean}"  # Fallback to basic format
+
     async def get_flow(self) -> Dict[str, Any]:
         """Pega fluxo de conversa (com cache de 5 min)."""
         if (self.flow_cache is None or
@@ -186,14 +258,15 @@ class ConversationManager:
             return await self._switch_to_ai_mode(session_id, "Obrigado pelas informações!")
 
     async def _handle_phone_collection(self, session_id: str, session_data: Dict[str, Any], user_response: str) -> Dict[str, Any]:
-        """Coleta e valida número de telefone."""
+        """Coleta e valida número de telefone com formatação corrigida para todos os DDDs brasileiros."""
         try:
             phone_clean = ''.join(filter(str.isdigit, user_response))
 
-            if len(phone_clean) < 10 or len(phone_clean) > 11:
+            # Validação mais flexível para diferentes formatos brasileiros
+            if len(phone_clean) < 10 or len(phone_clean) > 13:
                 return {
                     "session_id": session_id,
-                    "question": "Número inválido 😕 Digite no formato com DDD (ex: 11999999999):",
+                    "question": "Número inválido 😕 Digite no formato com DDD (ex: 11999999999, 21987654321, 47999998888):",
                     "flow_completed": True,
                     "ai_mode": False,
                     "phone_collected": False,
@@ -201,10 +274,8 @@ class ConversationManager:
                     "validation_error": True
                 }
 
-            if len(phone_clean) == 10:
-                phone_formatted = f"55{phone_clean[:2]}9{phone_clean[2:]}"
-            else:
-                phone_formatted = f"55{phone_clean}"
+            # CORREÇÃO: Usar a função de formatação corrigida
+            phone_formatted = self._format_brazilian_phone(phone_clean)
 
             session_data.update({
                 "phone_collected": True,
@@ -227,26 +298,44 @@ class ConversationManager:
             # Mensagem resumo
             responses = session_data.get("responses", {})
             user_name = responses.get("name", "Cliente")
+            area_info = responses.get('area_of_law', 'Não informada')
+            situation_info = responses.get('situation', 'Não informada')[:80]
+            
             whatsapp_message = (
                 f"Olá {user_name}! 👋\n\n"
                 f"Recebemos suas informações e nossa equipe vai entrar em contato.\n\n"
-                f"📋 Área: {responses.get('area_of_law', 'Não informada')}\n"
-                f"📝 Situação: {responses.get('situation', 'Não informada')[:80]}..."
+                f"📋 Área: {area_info}\n"
+                f"📝 Situação: {situation_info}..."
             )
 
             whatsapp_success = False
             try:
+                # CORREÇÃO: Usar o número formatado corretamente
+                whatsapp_target = f"{phone_formatted}@s.whatsapp.net"
+                logger.info(f"📤 Enviando mensagem WhatsApp para: {whatsapp_target}")
+                
                 whatsapp_success = await baileys_service.send_whatsapp_message(
-                    f"{phone_formatted}@s.whatsapp.net", whatsapp_message
+                    whatsapp_target, whatsapp_message
                 )
+                
+                if whatsapp_success:
+                    logger.info(f"✅ WhatsApp enviado com sucesso para {phone_formatted}")
+                else:
+                    logger.warning(f"⚠️ Falha no envio WhatsApp para {phone_formatted}")
+                    
             except Exception as err:
-                logger.error(f"❌ Erro enviando mensagem no WhatsApp: {str(err)}")
+                logger.error(f"❌ Erro enviando mensagem no WhatsApp para {phone_formatted}: {str(err)}")
 
             confirmation_message = (
                 f"Perfeito! Número confirmado: {phone_clean} 📱\n\n"
                 f"✅ Suas informações foram registradas.\n"
                 f"👨‍💼 Nossa equipe entrará em contato em breve."
             )
+
+            if whatsapp_success:
+                confirmation_message += f"\n\n✅ Mensagem de confirmação enviada para seu WhatsApp!"
+            else:
+                confirmation_message += f"\n\n⚠️ Suas informações foram salvas, mas houve um problema ao enviar a confirmação no WhatsApp."
 
             return {
                 "session_id": session_id,
@@ -255,7 +344,8 @@ class ConversationManager:
                 "ai_mode": True,
                 "phone_collected": True,
                 "whatsapp_sent": whatsapp_success,
-                "phone_number": phone_clean
+                "phone_number": phone_clean,
+                "phone_formatted": phone_formatted
             }
 
         except Exception as e:

@@ -22,7 +22,7 @@ class LeadAssignmentService:
     """Service for managing lead assignments to lawyers."""
     
     def __init__(self):
-           self.base_url = os.getenv("BASE_URL", "https://law-firm-backend-936902782519.us-central1.run.app")
+        self.base_url = os.getenv("BASE_URL", "https://law-firm-backend-936902782519-936902782519.us-central1.run.app")
     
     async def create_lead_with_assignment_links(
         self,
@@ -34,16 +34,6 @@ class LeadAssignmentService:
     ) -> Dict[str, Any]:
         """
         Create a new lead and send assignment notifications to all lawyers.
-        
-        Args:
-            lead_name (str): Name of the lead
-            lead_phone (str): Phone number of the lead
-            category (str): Legal category
-            situation (str): Description of the situation
-            additional_data (Dict[str, Any]): Additional lead data
-            
-        Returns:
-            Dict[str, Any]: Result of lead creation and notifications
         """
         try:
             # Generate unique lead ID
@@ -99,13 +89,6 @@ class LeadAssignmentService:
     ) -> Dict[str, Any]:
         """
         Assign a lead to a specific lawyer.
-        
-        Args:
-            lead_id (str): ID of the lead to assign
-            lawyer_id (str): ID/phone of the lawyer
-            
-        Returns:
-            Dict[str, Any]: Assignment result
         """
         try:
             # Get lead from Firebase
@@ -117,18 +100,8 @@ class LeadAssignmentService:
                     "message": "Lead not found",
                     "status": "not_found"
                 }
-            
-            # Check if already assigned
-            if lead_data.get("assigned_to"):
-                assigned_lawyer_name = lead_data.get("assigned_lawyer_name", "Unknown Lawyer")
-                return {
-                    "success": False,
-                    "message": f"This lead has already been assigned to {assigned_lawyer_name}.",
-                    "status": "already_assigned",
-                    "assigned_to": assigned_lawyer_name
-                }
-            
-            # Find lawyer info
+
+            # Pega info do advogado antes de verificar atribuição
             lawyers = get_lawyers_for_notification()
             lawyer_info = None
             for lawyer in lawyers:
@@ -141,6 +114,36 @@ class LeadAssignmentService:
                     "success": False,
                     "message": "Lawyer not found",
                     "status": "lawyer_not_found"
+                }
+
+            # Check if already assigned
+            if lead_data.get("assigned_to"):
+                assigned_lawyer_name = lead_data.get("assigned_lawyer_name", "Unknown Lawyer")
+
+                # Se foi o mesmo advogado que já tinha atribuído, redirecionar para WhatsApp
+                if lead_data.get("assigned_to") == lawyer_id:
+                    whatsapp_url = self._generate_whatsapp_url(
+                        lead_data["phone"],
+                        lead_data["lead_name"], 
+                        lawyer_info["name"],
+                        lead_data["category"],
+                        lead_data["situation"]
+                    )
+                    
+                    return {
+                        "success": True,
+                        "message": f"You already have this lead: {lead_data['lead_name']}",
+                        "status": "already_assigned_to_you",
+                        "whatsapp_url": whatsapp_url,
+                        "redirect_to_whatsapp": True
+                    }
+                
+                # Se foi outro advogado, mostrar mensagem de já atribuído
+                return {
+                    "success": False,
+                    "message": f"Este lead já foi atribuído pelo(a) {assigned_lawyer_name}.",
+                    "status": "already_assigned",
+                    "assigned_to": assigned_lawyer_name
                 }
             
             # Update lead assignment in Firebase
@@ -208,7 +211,7 @@ class LeadAssignmentService:
             clean_phone = f"55{clean_phone}"
         
         # Create message
-        message = f"Olá {lead_name}, Eu sou {lawyer_name} e eu vou cuidar do seu {category} caso. Situação: {situation[:100]}{'...' if len(situation) > 100 else ''}"
+        message = f"Olá {lead_name}, Eu sou {lawyer_name} e eu vou cuidar do seu caso {category}. Situação: {situation[:100]}{'...' if len(situation) > 100 else ''}"
         
         # URL encode the message
         import urllib.parse
@@ -273,7 +276,7 @@ Telefone: {lead_phone}
 Área jurídica: {category}
 Situação: {situation[:200]}{'...' if len(situation) > 200 else ''}
 
-👉 Clique no link abaixo se você deseja assumir este caso:
+👇 Clique no link abaixo se você deseja assumir este caso:
 {assignment_link}
 """
                     
@@ -362,7 +365,7 @@ Situação: {situation[:200]}{'...' if len(situation) > 200 else ''}
         """Notify other lawyers that the case has been taken."""
         try:
             lawyers = get_lawyers_for_notification()
-            notification_message = f"ℹ️ O cliente '{lead_name}' foi atribuido por {assigned_lawyer_name}."
+            notification_message = f"ℹ️ O cliente '{lead_name}' foi atribuido pelo {assigned_lawyer_name}."
             
             for lawyer in lawyers:
                 # Skip the lawyer who took the case

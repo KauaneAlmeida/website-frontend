@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
     
 class BaileysWhatsAppService:
     def __init__(self, base_url: str = None):
-        self.base_url = base_url or os.getenv("WHATSAPP_BOT_URL", "https://whatsapp-baileys-bot-pxcqfbc6va-uc.a.run.app")
+        self.base_url = base_url or os.getenv("WHATSAPP_BOT_URL", "https://whatsapp-bot-936902782519.us-central1.run.app")
         self.timeout = 10  # ✅ Timeout mais agressivo
         self.max_retries = 2  # ✅ Menos tentativas
         self.initialized = False
@@ -237,3 +237,6 @@ async def send_baileys_message(phone_number: str, message: str) -> bool:
 
 async def get_baileys_status() -> Dict[str, Any]:
     return await baileys_service.get_connection_status()
+
+
+
