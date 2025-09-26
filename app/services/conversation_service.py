@@ -1,333 +1,375 @@
 """
-Conversation Flow Service
+Conversation Flow Routes
 
-This module manages the guided conversation flow for law firm client intake.
-It handles step-by-step questions, user responses, and transitions to AI chat.
-
-The conversation flow is stored in Firebase and can be updated by lawyers
-without modifying the code.
+Handles intelligent conversation flow using AI orchestration.
+Web platform uses Firebase structured flow.
+WhatsApp platform uses structured flow via orchestrator.
 """
 
-import logging
 import uuid
-from typing import Dict, Any, Optional
+import logging
+import json
+import os
+from typing import Dict, Any
 from datetime import datetime
-from app.services.firebase_service import (
-    get_conversation_flow,
-    save_lead_data,
-    get_user_session,
-    save_user_session,
-    update_lead_data
-)
-from app.services.ai_service import process_chat_message
-from app.services.baileys_service import baileys_service
+from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import JSONResponse
 
-# Configure logging
+from app.models.request import ConversationRequest
+from app.models.response import ConversationResponse
+from app.services.orchestration_service import intelligent_orchestrator
+from app.services.firebase_service import get_firebase_service_status
+
+# Logging
 logger = logging.getLogger(__name__)
 
-class ConversationManager:
+# FastAPI router
+router = APIRouter()
+
+
+@router.post("/conversation/start", response_model=ConversationResponse)
+async def start_conversation():
     """
-    Gerencia o fluxo de conversa do chatbot jurídico.
+    Start a new conversation session for web platform.
+    Uses Firebase structured flow for web lead collection.
     """
+    try:
+        session_id = str(uuid.uuid4())
+        logger.info(f"🚀 Starting new web conversation | session={session_id}")
 
-    def __init__(self):
-        self.flow_cache = None
-        self.cache_timestamp = None
-
-    async def get_flow(self) -> Dict[str, Any]:
-        """Pega fluxo de conversa (com cache de 5 min)."""
-        if (self.flow_cache is None or
-            (datetime.now() - self.cache_timestamp).seconds > 300):
-            self.flow_cache = await get_conversation_flow()
-            self.cache_timestamp = datetime.now()
-        return self.flow_cache
-
-    async def start_conversation(self, session_id: Optional[str] = None) -> Dict[str, Any]:
-        """Inicia conversa nova."""
-        try:
-            if not session_id:
-                session_id = str(uuid.uuid4())
-
-            flow = await self.get_flow()
-
-            session_data = {
-                "session_id": session_id,
-                "current_step": 1,
-                "responses": {},
-                "flow_completed": False,
-                "ai_mode": False,
-                "phone_collected": False,
-                "started_at": datetime.now(),
-                "last_updated": datetime.now()
+        # Start with Firebase flow for web platform
+        result = await intelligent_orchestrator.process_message(
+            "olá", 
+            session_id, 
+            platform="web"
+        )
+        
+        response_data = ConversationResponse(
+            session_id=session_id,
+            response=result.get("response"),
+            ai_mode=False,  # Web uses structured Firebase flow
+            flow_completed=result.get("flow_completed", False),
+            phone_collected=result.get("phone_collected", False),
+            lead_data=result.get("lead_data", {}),
+            message_count=result.get("message_count", 1)
+        )
+        
+        logger.info(f"✅ Web conversation started | session={session_id} | response_length={len(response_data.response)}")
+        
+        # Return with explicit CORS headers
+        return JSONResponse(
+            content=response_data.dict(),
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization"
             }
+        )
 
-            await save_user_session(session_id, session_data)
+    except Exception as e:
+        logger.error(f"❌ Error starting web conversation: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start conversation: {str(e)}"
+        )
 
-            first_step = next((s for s in flow["steps"] if s["id"] == 1), None)
-            if not first_step:
-                raise ValueError("Nenhum primeiro passo encontrado no fluxo")
 
-            logger.info(f"✅ Conversa iniciada: {session_id}")
+@router.post("/conversation/respond", response_model=ConversationResponse)
+async def respond_to_conversation(request: ConversationRequest):
+    """
+    Process user response with Firebase structured flow for web platform.
+    
+    The system handles:
+    - Structured conversation flow
+    - Lead information collection
+    - Sequential question progression
+    - Phone number collection and submission
+    """
+    try:
+        # Generate session ID if not provided
+        if not request.session_id:
+            request.session_id = str(uuid.uuid4())
+            logger.info(f"🆕 Generated new web session: {request.session_id}")
 
-            return {
-                "session_id": session_id,
-                "question": first_step["question"],
-                "step_id": first_step["id"],
-                "is_final_step": len(flow["steps"]) == 1,
-                "flow_completed": False,
-                "ai_mode": False,
-                "phone_collected": False
+        logger.info(f"📝 Processing web response | session={request.session_id} | msg='{request.message[:50]}...'")
+
+        # Process via Intelligent Orchestrator (web platform uses Firebase flow)
+        result = await intelligent_orchestrator.process_message(
+            request.message,
+            request.session_id,
+            platform="web"
+        )
+        
+        response_data = ConversationResponse(
+            session_id=request.session_id,
+            response=result.get("response", "Como posso ajudá-lo?"),
+            ai_mode=False,  # Web uses structured Firebase flow
+            flow_completed=result.get("flow_completed", False),
+            phone_collected=result.get("phone_collected", False),
+            lead_data=result.get("lead_data", {}),
+            message_count=result.get("message_count", 1)
+        )
+        
+        # Log completion status
+        if response_data.flow_completed:
+            logger.info(f"🎉 Web flow completed | session={request.session_id}")
+        if response_data.phone_collected:
+            logger.info(f"📱 Phone collected via web | session={request.session_id}")
+        
+        # Return with explicit CORS headers
+        return JSONResponse(
+            content=response_data.dict(),
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization"
             }
+        )
 
-        except Exception as e:
-            logger.error(f"❌ Erro ao iniciar conversa: {str(e)}")
-            raise
+    except Exception as e:
+        logger.error(f"❌ Error processing web response | session={getattr(request, 'session_id', 'unknown')}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process conversation response: {str(e)}"
+        )
 
-    async def process_response(self, session_id: str, user_response: str) -> Dict[str, Any]:
-        """Processa resposta do usuário e devolve próxima pergunta ou resposta da IA."""
-        try:
-            session_data = await get_user_session(session_id)
-            if not session_data:
-                return await self.start_conversation(session_id)
 
-            # Se terminou o fluxo mas ainda não pegou telefone
-            if session_data.get("flow_completed") and not session_data.get("phone_collected"):
-                return await self._handle_phone_collection(session_id, session_data, user_response)
-
-            # Se já está no modo IA
-            if session_data.get("ai_mode"):
-                ai_response = await process_chat_message(user_response, session_id=session_id)
-                return {
-                    "session_id": session_id,
-                    "response": ai_response,
-                    "ai_mode": True,
-                    "flow_completed": True,
-                    "phone_collected": session_data.get("phone_collected", False)
-                }
-
-            flow = await self.get_flow()
-            current_step = session_data.get("current_step", 1)
-            current_step_data = next((s for s in flow["steps"] if s["id"] == current_step), None)
-
-            if not current_step_data:
-                return await self._switch_to_ai_mode(session_id, user_response)
-
-            # Salva resposta
-            field_name = current_step_data.get("field", f"step_{current_step}")
-            session_data["responses"][field_name] = user_response.strip()
-            session_data["last_updated"] = datetime.now()
-
-            # Próximo passo
-            next_step = current_step + 1
-            next_step_data = next((s for s in flow["steps"] if s["id"] == next_step), None)
-
-            if next_step_data:
-                session_data["current_step"] = next_step
-                await save_user_session(session_id, session_data)
-
-                return {
-                    "session_id": session_id,
-                    "question": next_step_data["question"],
-                    "step_id": next_step_data["id"],
-                    "is_final_step": next_step == len(flow["steps"]),
-                    "flow_completed": False,
-                    "ai_mode": False,
-                    "phone_collected": False
-                }
-            else:
-                return await self._complete_flow(session_id, session_data, flow)
-
-        except Exception as e:
-            logger.error(f"❌ Erro processando resposta ({session_id}): {str(e)}")
-            return await self._switch_to_ai_mode(session_id, user_response)
-
-    async def _complete_flow(self, session_id: str, session_data: Dict[str, Any], flow: Dict[str, Any]) -> Dict[str, Any]:
-        """Finaliza coleta de dados e pede telefone."""
-        try:
-            responses = session_data.get("responses", {})
-            lead_data = {
-                "name": responses.get("name", "Desconhecido"),
-                "area_of_law": responses.get("area_of_law", "Não informado"),
-                "situation": responses.get("situation", "Não informado"),
-                "wants_meeting": responses.get("wants_meeting", "Não informado"),
-                "session_id": session_id,
-                "completed_at": datetime.now(),
-                "status": "intake_completed"
-            }
-
-            lead_id = await save_lead_data(lead_data)
-
-            session_data.update({
-                "flow_completed": True,
-                "ai_mode": False,
-                "phone_collected": False,
-                "lead_id": lead_id,
-                "completed_at": datetime.now(),
-                "last_updated": datetime.now()
-            })
-
-            await save_user_session(session_id, session_data)
-
-            phone_message = "Obrigado pelas informações 🙏 Agora, me passe seu número com DDD (ex: 11999999999):"
-
-            return {
-                "session_id": session_id,
-                "question": phone_message,
-                "flow_completed": True,
-                "ai_mode": False,
-                "phone_collected": False,
-                "lead_saved": True,
-                "lead_id": lead_id,
-                "collecting_phone": True
-            }
-
-        except Exception as e:
-            logger.error(f"❌ Erro finalizando fluxo: {str(e)}")
-            return await self._switch_to_ai_mode(session_id, "Obrigado pelas informações!")
-
-    async def _handle_phone_collection(self, session_id: str, session_data: Dict[str, Any], user_response: str) -> Dict[str, Any]:
-        """Coleta e valida número de telefone."""
-        try:
-            phone_clean = ''.join(filter(str.isdigit, user_response))
-
-            if len(phone_clean) < 10 or len(phone_clean) > 11:
-                return {
-                    "session_id": session_id,
-                    "question": "Número inválido 😕 Digite no formato com DDD (ex: 11999999999):",
-                    "flow_completed": True,
-                    "ai_mode": False,
-                    "phone_collected": False,
-                    "collecting_phone": True,
-                    "validation_error": True
-                }
-
-            if len(phone_clean) == 10:
-                phone_formatted = f"55{phone_clean[:2]}9{phone_clean[2:]}"
-            else:
-                phone_formatted = f"55{phone_clean}"
-
-            session_data.update({
-                "phone_collected": True,
-                "ai_mode": True,
-                "phone_number": phone_clean,
-                "phone_formatted": phone_formatted,
-                "last_updated": datetime.now()
-            })
-
-            await save_user_session(session_id, session_data)
-
-            # Atualiza lead com telefone
-            await update_lead_data(session_data.get("lead_id"), {
-                "phone_number": phone_clean,
-                "phone_formatted": phone_formatted,
-                "status": "phone_collected",
-                "updated_at": datetime.now()
-            })
-
-            # Mensagem resumo
-            responses = session_data.get("responses", {})
-            user_name = responses.get("name", "Cliente")
-            whatsapp_message = (
-                f"Olá {user_name}! 👋\n\n"
-                f"Recebemos suas informações e nossa equipe vai entrar em contato.\n\n"
-                f"📋 Área: {responses.get('area_of_law', 'Não informada')}\n"
-                f"📝 Situação: {responses.get('situation', 'Não informada')[:80]}..."
+@router.post("/conversation/submit-phone")
+async def submit_phone_number(request: dict):
+    """
+    Submit phone number and trigger WhatsApp flow connection.
+    This finalizes the web intake and prepares for WhatsApp handover.
+    """
+    try:
+        phone_number = request.get("phone_number", "").strip()
+        session_id = request.get("session_id", "").strip()
+        user_name = request.get("user_name", "Cliente").strip()
+        
+        if not phone_number or not session_id:
+            logger.warning(f"⚠️ Invalid phone submission | phone={bool(phone_number)} | session={bool(session_id)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing phone_number or session_id"
             )
+        
+        logger.info(f"📱 Phone number submitted | session={session_id} | number={phone_number} | user={user_name}")
 
-            whatsapp_success = False
-            try:
-                whatsapp_success = await baileys_service.send_whatsapp_message(
-                    f"{phone_formatted}@s.whatsapp.net", whatsapp_message
-                )
-            except Exception as err:
-                logger.error(f"❌ Erro enviando mensagem no WhatsApp: {str(err)}")
+        # Process phone submission via orchestrator
+        result = await intelligent_orchestrator.handle_phone_number_submission(
+            phone_number, 
+            session_id,
+            user_name=user_name
+        )
+        
+        logger.info(f"✅ Phone submission processed | session={session_id} | success={result.get('success', False)}")
+        
+        return {
+            **result,
+            "timestamp": datetime.now().isoformat(),
+            "platform": "web_to_whatsapp_handover"
+        }
 
-            confirmation_message = (
-                f"Perfeito! Número confirmado: {phone_clean} 📱\n\n"
-                f"✅ Suas informações foram registradas.\n"
-                f"👨‍💼 Nossa equipe entrará em contato em breve."
-            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error processing phone submission | session={request.get('session_id', 'unknown')}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process phone number submission: {str(e)}"
+        )
 
-            return {
-                "session_id": session_id,
-                "response": confirmation_message,
-                "flow_completed": True,
-                "ai_mode": True,
-                "phone_collected": True,
-                "whatsapp_sent": whatsapp_success,
-                "phone_number": phone_clean
-            }
 
-        except Exception as e:
-            logger.error(f"❌ Erro na coleta do telefone: {str(e)}")
-            return {
-                "session_id": session_id,
-                "response": "Erro ao processar seu número. Vamos continuar! Como posso te ajudar?",
-                "flow_completed": True,
-                "ai_mode": True,
-                "phone_collected": False,
-                "error": str(e)
-            }
+@router.get("/conversation/status/{session_id}")
+async def get_conversation_status(session_id: str):
+    """
+    Get current conversation state for a session.
+    Works for both web and WhatsApp sessions.
+    """
+    try:
+        logger.info(f"📊 Fetching conversation status | session={session_id}")
+        
+        status_info = await intelligent_orchestrator.get_session_context(session_id)
+        
+        # Determine platform from session_id
+        platform = "whatsapp" if session_id.startswith("whatsapp_") else "web"
+        
+        return {
+            "session_id": session_id,
+            "platform": platform,
+            "status_info": status_info,
+            "timestamp": datetime.now().isoformat()
+        }
 
-    async def _switch_to_ai_mode(self, session_id: str, user_message: str) -> Dict[str, Any]:
-        """Troca para modo IA."""
-        try:
-            session_data = await get_user_session(session_id) or {}
-            session_data.update({
-                "ai_mode": True,
-                "flow_completed": True,
-                "phone_collected": False,  # não marcar como coletado sem ter número
-                "switched_to_ai_at": datetime.now(),
-                "last_updated": datetime.now()
-            })
-            await save_user_session(session_id, session_data)
+    except Exception as e:
+        logger.error(f"❌ Error getting status for session {session_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get conversation status: {str(e)}"
+        )
 
-            ai_response = await process_chat_message(user_message, session_id=session_id)
 
-            return {
-                "session_id": session_id,
-                "response": ai_response,
-                "ai_mode": True,
-                "flow_completed": True,
-                "phone_collected": False
-            }
+@router.get("/conversation/ai-config")
+async def get_ai_config():
+    """
+    Get AI system configuration for debugging/admin purposes.
+    Shows current prompts and system settings.
+    """
+    try:
+        from app.services.ai_chain import ai_orchestrator
 
-        except Exception as e:
-            logger.error(f"❌ Erro trocando para modo IA: {str(e)}")
-            return {
-                "session_id": session_id,
-                "response": "Estou aqui para te ajudar com questões jurídicas. Como posso te auxiliar?",
-                "ai_mode": True,
-                "flow_completed": True,
-                "phone_collected": False
-            }
+        config = {}
+        if os.path.exists("ai_schema.json"):
+            with open("ai_schema.json", "r", encoding="utf-8") as f:
+                config = json.load(f)
 
-    async def get_conversation_status(self, session_id: str) -> Dict[str, Any]:
-        """Retorna status atual da conversa."""
-        try:
-            session_data = await get_user_session(session_id)
-            if not session_data:
-                return {"exists": False}
+        return {
+            "current_system_prompt": ai_orchestrator.get_system_prompt(),
+            "full_config": config,
+            "config_source": "ai_schema.json" if config else "default",
+            "editable_location": "ai_schema.json in project root or AI_SYSTEM_PROMPT in .env",
+            "environment_prompt": bool(os.getenv("AI_SYSTEM_PROMPT")),
+            "api_key_configured": bool(os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")),
+            "timestamp": datetime.now().isoformat()
+        }
 
-            flow = await self.get_flow()
-            current_step = session_data.get("current_step", 1)
+    except Exception as e:
+        logger.error(f"❌ Error getting AI config: {str(e)}")
+        return {
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
 
-            return {
-                "exists": True,
-                "session_id": session_id,
-                "current_step": current_step,
-                "total_steps": len(flow["steps"]),
-                "flow_completed": session_data.get("flow_completed", False),
-                "ai_mode": session_data.get("ai_mode", False),
-                "phone_collected": session_data.get("phone_collected", False),
-                "responses_collected": len(session_data.get("responses", {})),
-                "started_at": session_data.get("started_at"),
-                "last_updated": session_data.get("last_updated")
-            }
 
-        except Exception as e:
-            logger.error(f"❌ Erro ao pegar status da conversa: {str(e)}")
-            return {"exists": False, "error": str(e)}
+@router.get("/conversation/flow")
+async def get_conversation_flow():
+    """
+    Get current conversation approach information.
+    Shows how different platforms are handled.
+    """
+    try:
+        return {
+            "approach": "platform_specific_structured_handling",
+            "description": "Both web and WhatsApp now use structured flows for lead collection",
+            "platforms": {
+                "web": {
+                    "method": "Firebase structured flow",
+                    "description": "Sequential questions via Firebase service",
+                    "fields": ["name", "area_of_law", "situation", "consent"],
+                    "completion": "Phone number collection + handover to WhatsApp"
+                },
+                "whatsapp": {
+                    "method": "Structured flow via orchestrator",
+                    "description": "Intelligent structured questions with AI assistance",
+                    "fields": ["name", "area_of_law", "situation", "consent"],
+                    "completion": "Direct lawyer notification + handover"
+                }
+            },
+            "features": [
+                "Platform-specific structured flows",
+                "Consistent lead collection across platforms",
+                "No AI free-form responses for lead collection",
+                "Automatic lawyer notifications",
+                "Session continuity tracking",
+                "Manual lawyer handover after completion"
+            ],
+            "lead_collection": {
+                "method": "structured_flows_both_platforms",
+                "web_approach": "Firebase sequential questions",
+                "whatsapp_approach": "Orchestrator structured questions",
+                "common_fields": ["name", "area_of_law", "situation", "consent"]
+            },
+            "configuration": {
+                "web_flow": "Firebase-based sequential questions",
+                "whatsapp_flow": "Orchestrator structured questions",
+                "final_step": "Lawyer notification + handover",
+                "handover": "Manual lawyer takeover after lead completion"
+            },
+            "timestamp": datetime.now().isoformat()
+        }
 
-# Instância global
-conversation_manager = ConversationManager()
+    except Exception as e:
+        logger.error(f"❌ Error retrieving conversation flow info: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve conversation flow information: {str(e)}"
+        )
+
+
+@router.get("/conversation/service-status")
+async def conversation_service_status():
+    """
+    Check overall conversation service health with comprehensive status information.
+    """
+    try:
+        # Get comprehensive status from orchestrator
+        service_status = await intelligent_orchestrator.get_overall_service_status()
+
+        return {
+            "service": "structured_conversation_service",
+            "status": service_status.get("overall_status", "unknown"),
+            "approach": "platform_specific_structured_flows",
+            "firebase_status": service_status.get("firebase_status", {"status": "unknown"}),
+            "ai_status": service_status.get("ai_status", {"status": "unknown"}),
+            "features": service_status.get("features", {}),
+            "platforms": {
+                "web": {
+                    "method": "Firebase structured flow",
+                    "status": service_status.get("firebase_status", {}).get("status", "unknown")
+                },
+                "whatsapp": {
+                    "method": "Orchestrator structured questions",
+                    "status": service_status.get("ai_status", {}).get("status", "unknown")
+                }
+            },
+            "endpoints": {
+                "start": "/api/v1/conversation/start",
+                "respond": "/api/v1/conversation/respond",
+                "submit_phone": "/api/v1/conversation/submit-phone",
+                "status": "/api/v1/conversation/status/{session_id}",
+                "ai_config": "/api/v1/conversation/ai-config",
+                "flow_info": "/api/v1/conversation/flow",
+                "service_status": "/api/v1/conversation/service-status"
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Error getting conversation service status: {str(e)}")
+        return {
+            "service": "structured_conversation_service", 
+            "status": "error", 
+            "approach": "platform_specific_structured_flows",
+            "firebase_status": {"status": "error"},
+            "ai_status": {"status": "error"},
+            "features": {},
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+@router.post("/conversation/reset-session/{session_id}")
+async def reset_conversation_session(session_id: str):
+    """
+    Reset a conversation session (useful for testing).
+    """
+    try:
+        logger.info(f"🔄 Resetting session: {session_id}")
+        
+        result = await intelligent_orchestrator.reset_session(session_id)
+        
+        return {
+            "status": "success",
+            "message": f"Session {session_id} reset successfully",
+            "session_id": session_id,
+            "result": result,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error resetting session {session_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to reset session: {str(e)}"
+        )
