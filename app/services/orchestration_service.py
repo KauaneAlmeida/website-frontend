@@ -1,1156 +1,930 @@
 """
-Intelligent Orchestration Service - VERSÃO COMPLETAMENTE CORRIGIDA PARA PLACEHOLDERS
+Intelligent Orchestration Service
 
-PRINCIPAIS CORREÇÕES:
-1. Mapeamento correto de campos Firebase para placeholders
-2. Processamento robusto de placeholders com fallbacks múltiplos
-3. Sincronização melhorada de dados entre Firebase e sessão
-4. Validação e logs detalhados para debug
-5. Fallback manual para casos críticos
+This service orchestrates the conversation flow between AI and Firebase fallback systems.
+It handles platform-specific logic, session management, and intelligent fallback mechanisms.
+
+FIXED: Placeholder replacement, message templates, and flow handling
 """
 
-import logging
+import os
 import re
 import uuid
-from typing import Dict, Any, Optional
+import logging
+import asyncio
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 
+from app.services.ai_chain import ai_orchestrator
 from app.services.firebase_service import (
-    get_conversation_flow,
+    get_conversation_flow, 
+    get_user_session, 
     save_user_session,
-    get_user_session,
     save_lead_data,
-    get_firebase_service_status,
     render_question,
     create_context_from_session_data,
+    update_lead_data_field,
     force_update_identification
 )
-from app.services.ai_chain import ai_orchestrator
 from app.services.baileys_service import baileys_service
 from app.services.lawyer_notification_service import lawyer_notification_service
 
 logger = logging.getLogger(__name__)
 
-
 class IntelligentHybridOrchestrator:
     """
-    Orchestrador unificado com processamento robusto de placeholders.
-    TOTALMENTE CORRIGIDO para problemas de substituição de placeholders.
+    Intelligent orchestrator that manages conversation flow with proper placeholder replacement.
     """
-
+    
     def __init__(self):
-        self.gemini_unavailable_until = None
-        self.gemini_check_interval = timedelta(minutes=5)
-        self.flow_cache = None
-        self.flow_cache_timestamp = None
-        self.flow_cache_ttl = timedelta(minutes=10)
-
+        self.gemini_available = True
+        self.last_gemini_check = datetime.now()
+        self.gemini_cooldown = timedelta(minutes=5)
+        
     async def process_message(
-        self,
-        message: str,
-        session_id: str,
-        phone_number: str = None,
-        platform: str = "web"
-    ) -> Dict[str, Any]:
-        """
-        Ponto de entrada principal com tratamento robusto de erros.
-        """
-        try:
-            logger.info(f"🎯 INÍCIO - Processing message | platform={platform} | session={session_id} | msg='{message[:50]}...'")
-
-            if not message or not message.strip():
-                logger.warning("⚠️ Mensagem vazia recebida")
-                return {
-                    "response": "Por favor, digite uma mensagem válida.",
-                    "response_type": "validation_error",
-                    "session_id": session_id,
-                    "error": "empty_message"
-                }
-
-            # Get or create session
-            session_data = await self._get_or_create_session(session_id, platform, phone_number)
-            logger.info(f"📊 Sessão: step={session_data.get('current_step')} | flow_completed={session_data.get('flow_completed')} | collecting_phone={session_data.get('collecting_phone')}")
-            
-            # Check if collecting phone number
-            if session_data.get("collecting_phone"):
-                return await self._handle_phone_collection(message, session_id, session_data)
-            
-            # Check if flow is completed and should use AI
-            if session_data.get("flow_completed") and session_data.get("phone_collected"):
-                return await self._handle_ai_conversation(message, session_id, session_data)
-            
-            # Handle structured flow progression
-            return await self._handle_structured_flow(message, session_id, session_data, platform)
-
-        except Exception as e:
-            logger.error(f"❌ ERRO CRÍTICO na orquestração | session={session_id}: {str(e)}")
-            import traceback
-            logger.error(f"🔍 Full traceback: {traceback.format_exc()}")
-            
-            return {
-                "response": "Desculpe, ocorreu um erro. Vamos começar novamente - qual é o seu nome completo?",
-                "response_type": "error_fallback",
-                "session_id": session_id,
-                "current_step": 1,
-                "flow_completed": False,
-                "error": str(e)
-            }
-
-    def _process_placeholders_in_text(self, text: str, session_data: Dict[str, Any]) -> str:
-        """
-        CORREÇÃO DEFINITIVA - Processamento baseado na documentação fornecida
-        """
-        try:
-            if not text or "{" not in text:
-                return text
-            
-            logger.info("="*60)
-            logger.info("🔧 RENDER_FIXED - PROCESSAMENTO DE PLACEHOLDERS")
-            logger.info(f"📝 Template original: '{text}'")
-            
-            # Extrair lead_data
-            lead_data = session_data.get("lead_data", {})
-            logger.info(f"📊 Lead data disponível: {lead_data}")
-            
-            # MAPEAMENTO COMPLETO baseado na documentação
-            placeholder_map = {}
-            
-            # 1. NOME/IDENTIFICAÇÃO - múltiplas fontes e aliases
-            identification = (
-                lead_data.get("identification") or 
-                lead_data.get("name") or 
-                lead_data.get("user_name") or
-                session_data.get("last_user_message", "") or
-                ""
-            ).strip()
-            
-            if identification:
-                name_aliases = [
-                    "{user_name}", "{user name}", "{name}", "{identification}",
-                    "{Name}", "{USER_NAME}", "{ username }", "{ user_name }",
-                    "{ name }", "{nome}", "{usuario}", "{cliente}"
-                ]
-                for alias in name_aliases:
-                    placeholder_map[alias] = identification
-                logger.info(f"✅ FIXED: Nome '{identification}' mapeado para {len(name_aliases)} aliases")
-            
-            # 2. CONTATO - múltiplos aliases
-            contact_info = (
-                lead_data.get("contact_info") or 
-                lead_data.get("contact") or 
-                lead_data.get("phone") or
-                session_data.get("phone_number", "") or
-                ""
-            ).strip()
-            
-            if contact_info:
-                contact_aliases = [
-                    "{contact_info}", "{contact}", "{phone}", "{telefone}",
-                    "{contato}", "{whatsapp}"
-                ]
-                for alias in contact_aliases:
-                    placeholder_map[alias] = contact_info
-                logger.info(f"✅ FIXED: Contato '{contact_info}' mapeado")
-            
-            # 3. ÁREA DO DIREITO - múltiplos aliases
-            area_qualification = (
-                lead_data.get("area_qualification") or 
-                lead_data.get("area") or 
-                lead_data.get("area_of_law") or
-                ""
-            ).strip()
-            
-            if area_qualification:
-                area_aliases = [
-                    "{area}", "{area_of_law}", "{area_qualification}",
-                    "{area_direito}", "{especialidade}"
-                ]
-                for alias in area_aliases:
-                    placeholder_map[alias] = area_qualification
-                logger.info(f"✅ FIXED: Área '{area_qualification}' mapeada")
-            
-            # 4. SITUAÇÃO/PROBLEMA - múltiplos aliases
-            problem_description = (
-                lead_data.get("problem_description") or 
-                lead_data.get("situation") or 
-                lead_data.get("case_details") or
-                ""
-            ).strip()
-            
-            if problem_description:
-                situation_aliases = [
-                    "{situation}", "{case_details}", "{problem_description}",
-                    "{situacao}", "{problema}", "{caso}"
-                ]
-                for alias in situation_aliases:
-                    placeholder_map[alias] = problem_description
-                logger.info(f"✅ FIXED: Situação mapeada")
-            
-            logger.info(f"🔧 PLACEHOLDER_MAP completo criado: {len(placeholder_map)} mapeamentos")
-            
-            # APLICAR SUBSTITUIÇÕES
-            processed_text = text
-            substitutions_made = []
-            
-            for placeholder, value in placeholder_map.items():
-                if placeholder in processed_text:
-                    processed_text = processed_text.replace(placeholder, value)
-                    substitutions_made.append(f"'{placeholder}' → '{value}'")
-                    logger.info(f"✅ FIXED: Substituído '{placeholder}' por '{value}'")
-            
-            # LIMPEZA FINAL de placeholders não substituídos
-            remaining_placeholders = re.findall(r'\{[^}]+\}', processed_text)
-            if remaining_placeholders:
-                logger.warning(f"⚠️ FIXED: Removendo placeholders não utilizados: {remaining_placeholders}")
-                for unused_placeholder in remaining_placeholders:
-                    # Se for relacionado a nome e temos identificação, usar ela
-                    if any(word in unused_placeholder.lower() for word in ["name", "user", "nome", "usuario"]) and identification:
-                        processed_text = processed_text.replace(unused_placeholder, identification)
-                        logger.info(f"🔧 FIXED: Fallback '{unused_placeholder}' → '{identification}'")
-                    else:
-                        processed_text = processed_text.replace(unused_placeholder, "")
-                        logger.info(f"🧹 FIXED: Removido '{unused_placeholder}'")
-            
-            # FORMATAÇÃO FINAL
-            processed_text = processed_text.replace("\\n", "\n")
-            processed_text = re.sub(r'\n\s*\n', '\n\n', processed_text)
-            processed_text = re.sub(r'[ \t]+', ' ', processed_text)
-            processed_text = processed_text.strip()
-            
-            logger.info(f"🔧 FIXED RESULT: '{processed_text[:100]}...' | substituições: {len(substitutions_made)}")
-            logger.info("="*60)
-            
-            return processed_text
-            
-        except Exception as e:
-            logger.error(f"❌ ERRO CRÍTICO no processamento: {str(e)}")
-            import traceback
-            logger.error(f"🔍 Traceback: {traceback.format_exc()}")
-            
-            # FALLBACK DE EMERGÊNCIA
-            try:
-                emergency_name = (
-                    session_data.get("lead_data", {}).get("identification") or
-                    session_data.get("last_user_message", "") or
-                    "usuário"
-                ).strip()
-                
-                emergency_text = text
-                emergency_patterns = [
-                    "{user name}", "{user_name}", "{name}", "{Name}",
-                    "{ username }", "{ user_name }", "{ name }"
-                ]
-                
-                for pattern in emergency_patterns:
-                    emergency_text = emergency_text.replace(pattern, emergency_name)
-                
-                # Remover outros placeholders
-                emergency_text = re.sub(r'\{[^}]+\}', '', emergency_text)
-                
-                logger.info(f"🚨 FALLBACK DE EMERGÊNCIA: '{emergency_name}'")
-                return emergency_text
-                
-            except Exception as final_error:
-                logger.error(f"❌ FALHA TOTAL: {final_error}")
-                return text or "Como posso ajudá-lo?"
-
-    async def _get_flow_with_cache(self) -> Dict[str, Any]:
-        """
-        Obter fluxo do Firebase com cache e fallback.
-        """
-        try:
-            # Verificar cache
-            if (self.flow_cache and self.flow_cache_timestamp and 
-                datetime.now() - self.flow_cache_timestamp < self.flow_cache_ttl):
-                logger.info("📚 Usando fluxo do cache")
-                return self.flow_cache
-            
-            # Buscar do Firebase
-            try:
-                logger.info("🔥 Buscando fluxo do Firebase...")
-                firebase_flow = await get_conversation_flow()
-                
-                if firebase_flow and firebase_flow.get("steps") and len(firebase_flow["steps"]) >= 3:
-                    logger.info(f"✅ Fluxo Firebase carregado com {len(firebase_flow['steps'])} steps")
-                    self.flow_cache = firebase_flow
-                    self.flow_cache_timestamp = datetime.now()
-                    return firebase_flow
-                else:
-                    logger.warning("⚠️ Fluxo Firebase inválido - usando fallback")
-                    raise Exception("Invalid Firebase flow")
-                    
-            except Exception as firebase_error:
-                logger.warning(f"⚠️ Erro Firebase: {str(firebase_error)} - usando fluxo hardcoded")
-                
-            # Fallback para fluxo hardcoded
-            hardcoded_flow = self._get_hardcoded_flow()
-            logger.info("🔧 Usando fluxo hardcoded como fallback")
-            return hardcoded_flow
-            
-        except Exception as e:
-            logger.error(f"❌ Erro crítico ao obter fluxo: {str(e)}")
-            return self._get_hardcoded_flow()
-
-    async def _get_or_create_session(
-        self,
-        session_id: str,
-        platform: str,
+        self, 
+        message: str, 
+        session_id: str, 
+        platform: str = "web",
         phone_number: str = None
     ) -> Dict[str, Any]:
         """
-        Obter sessão existente ou criar nova com melhor sincronização.
+        FIXED: Main message processing with proper placeholder replacement
         """
         try:
-            logger.info(f"🔍 Buscando/criando sessão: {session_id}")
+            logger.info(f"🎯 Processing message | session={session_id} | platform={platform} | msg='{message[:50]}...'")
             
+            # Get or create session
             session_data = await get_user_session(session_id)
-            
             if not session_data:
-                logger.info(f"🆕 Criando nova sessão para {session_id}")
-                session_data = {
-                    "session_id": session_id,
-                    "platform": platform,
-                    "current_step": 1,
-                    "flow_completed": False,
-                    "collecting_phone": False,
-                    "phone_collected": False,
-                    "ai_mode": False,
-                    "lead_data": {},
-                    "message_count": 0,
-                    "created_at": datetime.now(),
-                    "last_updated": datetime.now(),
-                    "flow_source": "firebase"
-                }
-                
-                if phone_number:
-                    session_data["phone_number"] = phone_number
-                
-                await self._persist_session_safely(session_id, session_data)
-                logger.info(f"✅ Nova sessão criada: {session_id}")
-            else:
-                logger.info(f"📋 Sessão existente: {session_id} | step={session_data.get('current_step')}")
+                session_data = await self._create_new_session(session_id, platform, phone_number)
             
-            # Atualizar contador de mensagens
+            # Update last message and increment counter
+            session_data["last_user_message"] = message.strip()
             session_data["message_count"] = session_data.get("message_count", 0) + 1
-            session_data["last_updated"] = datetime.now()
+            session_data["platform"] = platform
+            if phone_number:
+                session_data["phone_number"] = phone_number
             
-            return session_data
+            # Try AI first if available
+            if self._should_try_gemini():
+                try:
+                    ai_response = await self._attempt_gemini_response(message, session_id, session_data)
+                    if ai_response:
+                        session_data["gemini_available"] = True
+                        await save_user_session(session_id, session_data)
+                        
+                        return {
+                            "response": ai_response,
+                            "response_type": "ai_intelligent",
+                            "ai_mode": True,
+                            "gemini_available": True,
+                            "session_id": session_id,
+                            "platform": platform,
+                            "message_count": session_data["message_count"]
+                        }
+                except Exception as e:
+                    logger.warning(f"🚫 Gemini failed, using fallback: {str(e)}")
+                    self._mark_gemini_unavailable()
+                    session_data["gemini_available"] = False
+            
+            # Use Firebase fallback flow
+            return await self._handle_firebase_fallback(message, session_id, session_data, platform)
             
         except Exception as e:
-            logger.error(f"❌ Erro ao buscar/criar sessão: {str(e)}")
-            # Sessão padrão se Firebase falhar
+            logger.error(f"❌ Error in process_message: {str(e)}")
             return {
-                "session_id": session_id,
-                "platform": platform,
-                "current_step": 1,
-                "flow_completed": False,
-                "collecting_phone": False,
-                "phone_collected": False,
-                "ai_mode": False,
-                "lead_data": {},
-                "message_count": 1,
-                "created_at": datetime.now(),
-                "last_updated": datetime.now(),
-                "flow_source": "fallback"
+                "response": "Desculpe, ocorreu um erro. Tente novamente.",
+                "response_type": "error",
+                "error": str(e),
+                "session_id": session_id
             }
-
-    async def _persist_session_safely(self, session_id: str, session_data: Dict[str, Any]):
-        """
-        Persistir sessão com retry e melhor tratamento de erros.
-        """
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                await save_user_session(session_id, session_data)
-                logger.info(f"✅ Sessão persistida (tentativa {attempt + 1})")
-                return
-            except Exception as e:
-                logger.warning(f"⚠️ Erro ao salvar sessão (tentativa {attempt + 1}/{max_retries}): {str(e)}")
-                if attempt == max_retries - 1:
-                    logger.error(f"❌ Falha definitiva ao persistir sessão: {str(e)}")
-                    raise
-
-    def _is_initialization_message(self, message: str, current_step: int) -> bool:
-        """
-        Detectar mensagens de inicialização.
-        """
-        if current_step != 1:
+    
+    async def _create_new_session(self, session_id: str, platform: str, phone_number: str = None) -> Dict[str, Any]:
+        """Create new session with proper initialization"""
+        session_data = {
+            "session_id": session_id,
+            "platform": platform,
+            "created_at": datetime.now(),
+            "last_updated": datetime.now(),
+            "message_count": 0,
+            "current_step": 1,
+            "fallback_completed": False,
+            "phone_submitted": False,
+            "gemini_available": self.gemini_available,
+            "lead_data": {},
+            "conversation_history": []
+        }
+        
+        if phone_number:
+            session_data["phone_number"] = phone_number
+            
+        await save_user_session(session_id, session_data)
+        logger.info(f"🆕 New session created: {session_id}")
+        return session_data
+    
+    def _should_try_gemini(self) -> bool:
+        """Check if we should attempt Gemini AI"""
+        if not self.gemini_available:
+            # Check if cooldown period has passed
+            if datetime.now() - self.last_gemini_check > self.gemini_cooldown:
+                logger.info("🔄 Gemini cooldown expired, will retry")
+                self.gemini_available = True
+                return True
             return False
-        
-        message_lower = message.lower().strip()
-        init_messages = [
-            "olá", "oi", "hello", "hi", "hey", "ola", "oii", 
-            "start", "começar", "iniciar", "start_conversation",
-            "bom dia", "boa tarde", "boa noite", "opa", "e ai", "eai"
+        return True
+    
+    async def _attempt_gemini_response(self, message: str, session_id: str, session_data: Dict[str, Any]) -> Optional[str]:
+        """Attempt to get response from Gemini AI"""
+        try:
+            logger.info(f"🤖 Attempting Gemini AI response for session {session_id}")
+            
+            # Create context from session data
+            context = create_context_from_session_data(session_data)
+            context["platform"] = session_data.get("platform", "web")
+            
+            response = await asyncio.wait_for(
+                ai_orchestrator.generate_response(message, session_id, context),
+                timeout=15.0
+            )
+            
+            if response and len(response.strip()) > 0:
+                logger.info(f"✅ Valid Gemini response received for session {session_id}")
+                return response.strip()
+            
+            return None
+            
+        except asyncio.TimeoutError:
+            logger.error("⏰ Gemini API request timed out")
+            raise Exception("timeout: Gemini API request timed out")
+        except Exception as e:
+            error_str = str(e).lower()
+            if self._is_quota_error(error_str):
+                logger.error(f"🚫 Gemini quota/rate limit error: {e}")
+                raise Exception(f"quota: {e}")
+            else:
+                logger.error(f"❌ Gemini API error: {e}")
+                raise e
+    
+    def _is_quota_error(self, error_str: str) -> bool:
+        """Check if error indicates quota/rate limit issues"""
+        quota_indicators = [
+            "429", "quota", "rate limit", "resourceexhausted", 
+            "billing", "too many requests", "quota exceeded"
         ]
-        
-        return (len(message.strip()) <= 10 and message_lower in init_messages) or message_lower in init_messages
-
-    async def _handle_structured_flow(
-        self,
-        message: str,
-        session_id: str,
-        session_data: Dict[str, Any],
+        return any(indicator in error_str for indicator in quota_indicators)
+    
+    def _mark_gemini_unavailable(self):
+        """Mark Gemini as unavailable and set cooldown"""
+        self.gemini_available = False
+        self.last_gemini_check = datetime.now()
+        logger.warning(f"🚫 Gemini marked unavailable until {self.last_gemini_check + self.gemini_cooldown}")
+    
+    async def _handle_firebase_fallback(
+        self, 
+        message: str, 
+        session_id: str, 
+        session_data: Dict[str, Any], 
         platform: str
     ) -> Dict[str, Any]:
         """
-        🔧 REESCRITO - Fluxo estruturado com melhor sincronização de dados.
+        FIXED: Handle Firebase fallback with proper placeholder replacement
         """
         try:
-            flow = await self._get_flow_with_cache()
-            current_step = session_data.get("current_step", 1)
+            logger.info(f"⚡ Activating Firebase fallback for session {session_id}")
             
-            logger.info(f"📋 Fluxo estruturado | step={current_step} | msg='{message[:30]}...'")
+            # Check if we're collecting phone number
+            if session_data.get("fallback_completed") and not session_data.get("phone_submitted"):
+                return await self._handle_phone_collection(message, session_id, session_data)
             
-            # Encontrar step atual
-            current_step_data = None
-            for step in flow.get("steps", []):
+            # Get conversation flow
+            flow_data = await get_conversation_flow()
+            steps = flow_data.get("steps", [])
+            
+            if not steps:
+                logger.error("❌ No steps found in conversation flow")
+                return {
+                    "response": "Desculpe, ocorreu um erro no sistema. Tente novamente.",
+                    "response_type": "error",
+                    "session_id": session_id
+                }
+            
+            # Initialize fallback if needed
+            if not session_data.get("fallback_step"):
+                session_data["fallback_step"] = 1
+                session_data["fallback_completed"] = False
+                logger.info(f"🚀 Initialized fallback at step 1 for session {session_id}")
+            
+            current_step = session_data.get("fallback_step", 1)
+            
+            # Find current step
+            step_data = None
+            for step in steps:
                 if step.get("id") == current_step:
-                    current_step_data = step
+                    step_data = step
                     break
             
-            if not current_step_data:
-                logger.error(f"❌ Step {current_step} não encontrado - completando fluxo")
-                return await self._complete_flow_and_collect_phone(session_id, session_data, flow)
+            if not step_data:
+                logger.error(f"❌ Step {current_step} not found in flow")
+                return await self._complete_fallback_flow(session_id, session_data, flow_data)
             
-            # Verificar se é mensagem de inicialização
-            is_init_message = self._is_initialization_message(message, current_step)
-            
-            if is_init_message:
-                logger.info("🚀 Mensagem de inicialização - retornando pergunta inicial")
-                question_with_placeholders = self._process_placeholders_in_text(
-                    current_step_data["question"], 
-                    session_data
+            # Process user's answer if not the first interaction
+            if session_data.get("message_count", 0) > 1:
+                answer_processed = await self._process_step_answer(
+                    message, current_step, session_id, session_data, step_data
                 )
                 
-                return {
-                    "response": question_with_placeholders,
-                    "response_type": "structured_question",
-                    "session_id": session_id,
-                    "current_step": current_step,
-                    "flow_completed": False,
-                    "ai_mode": False
-                }
-            
-            # Obter nome do campo
-            field_name = current_step_data.get("field", f"step_{current_step}")
-            
-            # Verificar se já respondeu
-            if field_name in session_data.get("lead_data", {}):
-                logger.info(f"⚠️ Step {current_step} já respondido, avançando")
-                return await self._advance_to_next_step(session_id, session_data, flow, current_step)
-            
-            # Validar resposta
-            if not self._validate_answer(message, current_step, current_step_data):
-                logger.warning(f"❌ Resposta inválida para step {current_step}")
-                error_message = current_step_data.get("error_message", "Por favor, forneça uma resposta mais completa.")
-                validation_question = self._process_placeholders_in_text(
-                    current_step_data["question"], 
-                    session_data
-                )
+                if not answer_processed:
+                    # Re-ask the same question with proper context
+                    context = create_context_from_session_data(session_data)
+                    question = render_question(step_data.get("question", ""), context)
+                    
+                    return {
+                        "response": question,
+                        "response_type": "fallback_firebase",
+                        "session_id": session_id,
+                        "current_step": current_step,
+                        "validation_error": True,
+                        "ai_mode": False,
+                        "gemini_available": False
+                    }
                 
-                return {
-                    "response": f"{error_message} {validation_question}",
-                    "response_type": "validation_error",
-                    "session_id": session_id,
-                    "current_step": current_step,
-                    "flow_completed": False,
-                    "ai_mode": False
-                }
+                # Move to next step
+                current_step += 1
+                session_data["fallback_step"] = current_step
+                
+                # Check if flow is complete
+                if current_step > len(steps):
+                    return await self._complete_fallback_flow(session_id, session_data, flow_data)
+                
+                # Get next step
+                step_data = None
+                for step in steps:
+                    if step.get("id") == current_step:
+                        step_data = step
+                        break
+                
+                if not step_data:
+                    return await self._complete_fallback_flow(session_id, session_data, flow_data)
             
-            # 🔧 SALVAR RESPOSTA COM MAPEAMENTO CORRETO
-            logger.info(f"💾 Salvando resposta para step {current_step} no campo '{field_name}': '{message}'")
+            # FIXED: Render question with proper context
+            context = create_context_from_session_data(session_data)
+            question = render_question(step_data.get("question", ""), context)
             
-            if "lead_data" not in session_data:
-                session_data["lead_data"] = {}
+            # Save session
+            await save_user_session(session_id, session_data)
             
-            # SALVAR NO CAMPO PRIMÁRIO
-            session_data["lead_data"][field_name] = message.strip()
-            session_data["last_user_message"] = message.strip()
+            logger.info(f"➡️ Presenting step {current_step} for session {session_id}")
             
-            # 🔧 CRÍTICO: Criar aliases para compatibilidade baseado na documentação
+            return {
+                "response": question,
+                "response_type": "fallback_firebase",
+                "session_id": session_id,
+                "current_step": current_step,
+                "ai_mode": False,
+                "gemini_available": False,
+                "fallback_completed": False,
+                "phone_submitted": False
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error in Firebase fallback: {str(e)}")
+            return {
+                "response": "Desculpe, ocorreu um erro. Como posso ajudá-lo?",
+                "response_type": "fallback_error",
+                "session_id": session_id,
+                "error": str(e)
+            }
+    
+    async def _process_step_answer(
+        self, 
+        answer: str, 
+        step_id: int, 
+        session_id: str, 
+        session_data: Dict[str, Any],
+        step_data: Dict[str, Any]
+    ) -> bool:
+        """
+        FIXED: Process and validate step answers with proper field mapping
+        """
+        try:
+            answer = answer.strip()
+            field_name = step_data.get("field", f"step_{step_id}")
+            
+            logger.info(f"💾 Processing answer for step {step_id} | field={field_name} | answer='{answer[:50]}...'")
+            
+            # Validate answer
+            if not self._validate_answer(answer, step_data):
+                logger.warning(f"⚠️ Invalid answer for step {step_id}: '{answer}'")
+                return False
+            
+            # Normalize answer based on step type
+            normalized_answer = self._normalize_answer(answer, step_id, step_data)
+            
+            # Store in lead_data with correct field name
+            lead_data = session_data.get("lead_data", {})
+            lead_data[field_name] = normalized_answer
+            
+            # FIXED: Also store with common aliases for template rendering
             if field_name == "identification":
-                # Nome tem múltiplos aliases
-                name_value = message.strip().title()
-                session_data["lead_data"]["identification"] = name_value
-                session_data["lead_data"]["name"] = name_value
-                session_data["lead_data"]["user_name"] = name_value
-                logger.info(f"✅ FIXED: Nome salvo com aliases: identification='{name_value}'")
-                
+                lead_data["name"] = normalized_answer
+                lead_data["user_name"] = normalized_answer
+                lead_data["username"] = normalized_answer
             elif field_name == "area_qualification":
-                # Área do direito com aliases
-                area_value = message.strip()
-                session_data["lead_data"]["area_qualification"] = area_value
-                session_data["lead_data"]["area"] = area_value
-                session_data["lead_data"]["area_of_law"] = area_value
-                logger.info(f"✅ FIXED: Área salva com aliases: area='{area_value}'")
-                
-            elif field_name == "contact_info":
-                # Contato com aliases
-                contact_value = message.strip()
-                session_data["lead_data"]["contact_info"] = contact_value
-                session_data["lead_data"]["contact"] = contact_value
-                logger.info(f"✅ FIXED: Contato salvo com aliases")
-                
+                lead_data["area"] = normalized_answer
+                lead_data["area_of_law"] = normalized_answer
             elif field_name == "problem_description":
-                # Situação com aliases
-                situation_value = message.strip()
-                session_data["lead_data"]["problem_description"] = situation_value
-                session_data["lead_data"]["situation"] = situation_value
-                session_data["lead_data"]["case_details"] = situation_value
-                logger.info(f"✅ FIXED: Situação salva com aliases")
+                lead_data["situation"] = normalized_answer
+                lead_data["case_details"] = normalized_answer
+            elif field_name == "contact_info":
+                lead_data["contact"] = normalized_answer
+                lead_data["phone"] = normalized_answer
+                lead_data["whatsapp"] = normalized_answer
             
-            # 🔧 PERSISTIR IMEDIATAMENTE ANTES DE AVANÇAR
-            session_data["last_updated"] = datetime.now()
-            await self._persist_session_safely(session_id, session_data)
+            session_data["lead_data"] = lead_data
             
-            # 🔧 AGUARDAR SINCRONIZAÇÃO
-            import asyncio
-            await asyncio.sleep(0.2)
+            # Force update in Firebase
+            success = await update_lead_data_field(session_id, field_name, normalized_answer)
+            if field_name == "identification":
+                await force_update_identification(session_id, normalized_answer)
             
-            # 🔧 RECARREGAR DADOS DO FIREBASE para garantir sincronização
-            try:
-                fresh_session_data = await get_user_session(session_id)
-                if fresh_session_data and fresh_session_data.get("lead_data"):
-                    session_data = fresh_session_data
-                    logger.info(f"🔄 Dados recarregados: {list(session_data['lead_data'].keys())}")
-            except Exception as reload_error:
-                logger.error(f"❌ Erro ao recarregar: {reload_error}")
+            logger.info(f"💾 Stored answer for step {step_id} | field={field_name} | value='{normalized_answer}' | success={success}")
             
-            # Avançar para próximo step
-            return await self._advance_to_next_step(session_id, session_data, flow, current_step)
-                
+            return True
+            
         except Exception as e:
-            logger.error(f"❌ Erro no fluxo estruturado: {str(e)}")
-            import traceback
-            logger.error(f"🔍 Traceback: {traceback.format_exc()}")
-            
-            # Fallback robusto
-            return {
-                "response": "Qual é o seu nome completo?",
-                "response_type": "error_fallback",
-                "session_id": session_id,
-                "current_step": 1,
-                "flow_completed": False,
-                "ai_mode": False
-            }
-
-    async def _advance_to_next_step(
-        self,
-        session_id: str,
-        session_data: Dict[str, Any],
-        flow: Dict[str, Any],
-        current_step: int
-    ) -> Dict[str, Any]:
-        """
-        🔧 REESCRITO - Avanço com melhor sincronização e processamento de placeholders.
-        """
-        try:
-            next_step = current_step + 1
-            logger.info(f"➡️ Avançando de step {current_step} para {next_step}")
-            
-            # Encontrar próximo step
-            next_step_data = None
-            for step in flow.get("steps", []):
-                if step.get("id") == next_step:
-                    next_step_data = step
-                    break
-            
-            if next_step_data:
-                # 🔧 ATUALIZAR E PERSISTIR ANTES DE PROCESSAR PLACEHOLDERS
-                session_data["current_step"] = next_step
-                session_data["last_updated"] = datetime.now()
-                await self._persist_session_safely(session_id, session_data)
-                
-                # 🔧 AGUARDAR SINCRONIZAÇÃO
-                import asyncio
-                await asyncio.sleep(0.3)
-                
-                # 🔧 RECARREGAR DADOS ATUALIZADOS
-                try:
-                    fresh_session_data = await get_user_session(session_id)
-                    if fresh_session_data:
-                        session_data = fresh_session_data
-                        logger.info(f"🔄 Dados frescos carregados para processamento de placeholders")
-                except Exception:
-                    logger.warning("⚠️ Não foi possível recarregar - usando dados em memória")
-                
-                # 🔧 PROCESSAR PLACEHOLDERS COM DADOS ATUALIZADOS
-                next_question_with_placeholders = self._process_placeholders_in_text(
-                    next_step_data["question"], 
-                    session_data
-                )
-                
-                return {
-                    "response": next_question_with_placeholders,
-                    "response_type": "structured_question",
-                    "session_id": session_id,
-                    "current_step": next_step,
-                    "flow_completed": False,
-                    "ai_mode": False
-                }
-            else:
-                # Fluxo completo
-                logger.info("🏁 Fluxo estruturado completo")
-                return await self._complete_flow_and_collect_phone(session_id, session_data, flow)
+            logger.error(f"❌ Error processing step answer: {str(e)}")
+            return False
+    
+    def _validate_answer(self, answer: str, step_data: Dict[str, Any]) -> bool:
+        """Validate user answer based on step requirements"""
+        if not answer or len(answer.strip()) < 1:
+            return False
         
-        except Exception as e:
-            logger.error(f"❌ Erro ao avançar step: {str(e)}")
-            return {
-                "response": "Qual o melhor telefone/WhatsApp para contato?",
-                "response_type": "advance_error_fallback",
-                "session_id": session_id,
-                "current_step": current_step + 1,
-                "flow_completed": False,
-                "ai_mode": False
+        validation = step_data.get("validation", {})
+        min_length = validation.get("min_length", 1)
+        
+        if len(answer.strip()) < min_length:
+            return False
+        
+        # Step-specific validation
+        step_type = validation.get("type", "")
+        
+        if step_type == "name":
+            # Name should have at least 2 words
+            words = answer.strip().split()
+            return len(words) >= 2 and all(len(word) >= 2 for word in words)
+        
+        elif step_type == "contact_combined":
+            # Should contain phone and email
+            has_phone = bool(re.search(r'\d{10,13}', answer))
+            has_email = bool(re.search(r'[\w\.-]+@[\w\.-]+\.\w+', answer))
+            return has_phone or has_email  # At least one
+        
+        elif step_type == "area":
+            # Should be a valid legal area
+            return len(answer.strip()) >= 3
+        
+        elif step_type == "case_description":
+            # Should be descriptive enough
+            return len(answer.strip()) >= 10
+        
+        return True
+    
+    def _normalize_answer(self, answer: str, step_id: int, step_data: Dict[str, Any]) -> str:
+        """Normalize answer based on step type"""
+        answer = answer.strip()
+        
+        validation = step_data.get("validation", {})
+        normalize_map = validation.get("normalize_map", {})
+        
+        # Apply normalization map
+        answer_lower = answer.lower()
+        for key, value in normalize_map.items():
+            if key in answer_lower:
+                return value
+        
+        # Step-specific normalization
+        step_type = validation.get("type", "")
+        
+        if step_type == "name":
+            return answer.title()
+        elif step_type == "area":
+            # Common area normalizations
+            area_map = {
+                "penal": "Direito Penal",
+                "criminal": "Direito Penal",
+                "crime": "Direito Penal",
+                "trabalhista": "Direito Trabalhista",
+                "trabalho": "Direito Trabalhista",
+                "clt": "Direito Trabalhista",
+                "civil": "Direito Civil",
+                "civel": "Direito Civil",
+                "família": "Direito de Família",
+                "familia": "Direito de Família",
+                "divorcio": "Direito de Família",
+                "saude": "Saúde/Liminares",
+                "saúde": "Saúde/Liminares",
+                "liminar": "Saúde/Liminares",
+                "consumidor": "Direito do Consumidor",
+                "tributario": "Direito Tributário",
+                "previdenciario": "Direito Previdenciário"
             }
-
-    def _get_hardcoded_flow(self) -> Dict[str, Any]:
-        """
-        Fluxo hardcoded como fallback.
-        """
-        return {
-            "steps": [
-                {
-                    "id": 1,
-                    "question": "👋 Olá! Seja bem-vindo ao m.lima. Estou aqui para entender seu caso e agilizar o contato com um de nossos advogados especializados.\n\nPara começar, qual é o seu nome completo?",
-                    "field": "identification",
-                    "context": "",
-                    "error_message": "Por favor, informe seu nome completo para que possamos te atender adequadamente.",
-                    "validation": {
-                        "required": True,
-                        "min_length": 2
-                    }
-                },
-                {
-                    "id": 2,
-                    "question": "Prazer em conhecê-lo, {username}!\n\n📱 Qual o melhor telefone/WhatsApp para contato?\n\n📧 Você poderia informar seu e-mail também?",
-                    "field": "contact_info",
-                    "context": "contact_collection",
-                    "error_message": "Por favor, informe seu telefone (com DDD) e e-mail para contato.",
-                    "validation": {
-                        "required": True,
-                        "min_length": 10,
-                        "type": "contact_combined"
-                    }
-                },
-                {
-                    "id": 3,
-                    "question": "Perfeito, {username}! Com qual área do direito você precisa de ajuda? Penal ou Saúde (ações e liminares médicas)?",
-                    "field": "area_qualification",
-                    "context": "area_qualification",
-                    "error_message": "Por favor, especifique a área do direito que precisa de ajuda.",
-                    "validation": {
-                        "required": True,
-                        "min_length": 3
-                    }
-                },
-                {
-                    "id": 4,
-                    "question": "Perfeito, {username}! Com qual área do direito você precisa de ajuda? Penal ou Saúde (ações e liminares médicas)? Vim do firestone",
-                    "field": "problem_description",
-                    "context": "problem_gathering",
-                    "error_message": "Por favor, descreva sua situação com mais detalhes.",
-                    "validation": {
-                        "required": True,
-                        "min_length": 10
-                    }
-                }
-            ]
-        }
-
-    async def _complete_flow_and_collect_phone(
-        self,
-        session_id: str,
-        session_data: Dict[str, Any],
-        flow: Dict[str, Any]
+            
+            answer_lower = answer.lower().strip()
+            for key, value in area_map.items():
+                if key in answer_lower:
+                    return value
+            
+            return answer.title()
+        
+        return answer
+    
+    async def _complete_fallback_flow(
+        self, 
+        session_id: str, 
+        session_data: Dict[str, Any], 
+        flow_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Completar fluxo e iniciar coleta de telefone.
+        FIXED: Complete fallback flow with proper message rendering
         """
         try:
-            lead_data_raw = session_data.get("lead_data", {})
+            logger.info(f"🎉 Completing fallback flow for session {session_id}")
             
-            # Marcar fluxo como completo
-            session_data["flow_completed"] = True
-            session_data["collecting_phone"] = True
+            # Mark as completed
+            session_data["fallback_completed"] = True
+            session_data["completed_at"] = datetime.now()
             
-            # Preparar dados do lead
-            lead_data = {
-                "name": lead_data_raw.get("identification", "Não informado"),
-                "contact_info": lead_data_raw.get("contact_info", "Não informado"),
-                "area_of_law": lead_data_raw.get("area_qualification", "Não informado"),
-                "situation": lead_data_raw.get("problem_description", "Não informado"),
-                "session_id": session_id,
-                "platform": session_data.get("platform", "web"),
-                "completed_at": datetime.now(),
-                "status": "intake_completed"
-            }
+            # FIXED: Render completion message with context
+            context = create_context_from_session_data(session_data)
+            completion_message = flow_data.get("completion_message", "Obrigado! Suas informações foram registradas.")
+            rendered_message = render_question(completion_message, context)
             
-            # Salvar dados do lead
-            try:
-                lead_id = await save_lead_data(lead_data)
-                session_data["lead_id"] = lead_id
-                logger.info(f"✅ Lead data saved with ID: {lead_id}")
-            except Exception as e:
-                logger.error(f"⚠️ Erro ao salvar lead data: {str(e)}")
-                session_data["lead_id"] = f"temp_{session_id}"
+            # Add phone collection prompt
+            phone_prompt = "\n\n📱 Para finalizar, preciso do seu número de WhatsApp para que nossos advogados entrem em contato:"
+            final_message = rendered_message + phone_prompt
             
-            await self._persist_session_safely(session_id, session_data)
-            
-            # Personalizar mensagem com nome do usuário
-            user_name = lead_data.get("name", "")
-            if user_name and user_name != "Não informado":
-                phone_message = f"Perfeito, {user_name}! Suas informações foram registradas. Para finalizar, me informe seu número de WhatsApp com DDD (ex: 11999999999):"
-            else:
-                phone_message = "Perfeito! Suas informações foram registradas. Para finalizar, me informe seu número de WhatsApp com DDD (ex: 11999999999):"
+            await save_user_session(session_id, session_data)
             
             return {
-                "response": phone_message,
-                "response_type": "phone_collection",
+                "response": final_message,
+                "response_type": "fallback_completed",
                 "session_id": session_id,
-                "flow_completed": True,
-                "collecting_phone": True,
-                "lead_id": session_data.get("lead_id"),
-                "ai_mode": False
+                "fallback_completed": True,
+                "phone_submitted": False,
+                "ai_mode": False,
+                "gemini_available": False,
+                "lead_data": session_data.get("lead_data", {})
             }
             
         except Exception as e:
-            logger.error(f"❌ Erro ao completar fluxo: {str(e)}")
+            logger.error(f"❌ Error completing fallback flow: {str(e)}")
             return {
-                "response": "Para finalizar, me informe seu número de WhatsApp:",
-                "response_type": "phone_collection_fallback",
+                "response": "Obrigado pelas informações! Para finalizar, preciso do seu número de WhatsApp:",
+                "response_type": "fallback_completed",
                 "session_id": session_id,
-                "flow_completed": True,
-                "collecting_phone": True,
-                "ai_mode": False
+                "fallback_completed": True,
+                "phone_submitted": False
             }
-
+    
     async def _handle_phone_collection(
-        self,
-        message: str,
-        session_id: str,
+        self, 
+        phone_message: str, 
+        session_id: str, 
         session_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Lidar com coleta de número de telefone.
+        FIXED: Handle phone collection with proper validation and WhatsApp integration
         """
         try:
-            phone_clean = re.sub(r'[^\d]', '', message)
+            logger.info(f"📱 Processing phone collection for session {session_id}")
             
-            # Validar número
-            if len(phone_clean) < 10 or len(phone_clean) > 11:
+            # Validate phone number
+            if not self._is_phone_number(phone_message):
                 return {
-                    "response": "Número inválido. Por favor, digite seu WhatsApp com DDD (ex: 11999999999):",
+                    "response": "Por favor, informe um número de telefone válido (com DDD):\nExemplo: 11999999999",
                     "response_type": "phone_validation_error",
                     "session_id": session_id,
-                    "collecting_phone": True,
-                    "flow_completed": True,
-                    "ai_mode": False
+                    "fallback_completed": True,
+                    "phone_submitted": False
                 }
             
-            # Formatar número
-            if len(phone_clean) == 10:
-                phone_formatted = f"55{phone_clean[:2]}9{phone_clean[2:]}"
-            else:
-                phone_formatted = f"55{phone_clean}"
+            # Clean and format phone
+            clean_phone = self._clean_phone_number(phone_message)
             
-            # Atualizar sessão
-            session_data["phone_collected"] = True
-            session_data["collecting_phone"] = False
-            session_data["ai_mode"] = True
-            session_data["phone_number"] = phone_clean
-            session_data["phone_formatted"] = phone_formatted
+            # Update session
+            session_data["phone_submitted"] = True
+            session_data["phone_number"] = clean_phone
+            session_data["completed_at"] = datetime.now()
             
-            await self._persist_session_safely(session_id, session_data)
+            # Get user data for messages
+            lead_data = session_data.get("lead_data", {})
+            user_name = (
+                lead_data.get("identification") or 
+                lead_data.get("name") or 
+                lead_data.get("user_name") or 
+                "Cliente"
+            )
             
-            # Enviar confirmações
+            # FIXED: Create context for message rendering
+            context = create_context_from_session_data(session_data)
+            context["phone_number"] = clean_phone
+            context["user_name"] = user_name
+            
+            # Save lead data to Firebase
             try:
-                await self._send_whatsapp_confirmation_and_notify(session_data, phone_formatted)
-            except Exception as e:
-                logger.error(f"⚠️ Erro ao enviar confirmação WhatsApp: {str(e)}")
+                lead_record = {
+                    "name": user_name,
+                    "phone_number": clean_phone,
+                    "session_id": session_id,
+                    "platform": session_data.get("platform", "web"),
+                    **lead_data
+                }
+                
+                lead_id = await save_lead_data(lead_record)
+                session_data["lead_id"] = lead_id
+                logger.info(f"💾 Lead saved with ID: {lead_id}")
+                
+            except Exception as save_error:
+                logger.error(f"❌ Error saving lead: {save_error}")
             
-            # Personalizar confirmação com nome do usuário
-            user_name = session_data.get("lead_data", {}).get("identification", "")
-            if user_name and user_name != "Não informado":
-                confirmation_message = f"✅ Número confirmado: {phone_clean}\n\n{user_name}, suas informações foram registradas com sucesso! Nossa equipe entrará em contato em breve."
-            else:
-                confirmation_message = f"✅ Número confirmado: {phone_clean}\n\nSuas informações foram registradas com sucesso! Nossa equipe entrará em contato em breve."
+            # Send WhatsApp messages
+            whatsapp_success = await self._send_whatsapp_messages(clean_phone, user_name, lead_data, session_id)
+            
+            # Notify lawyers
+            notification_success = await self._notify_lawyers(user_name, clean_phone, lead_data)
+            
+            # Save final session
+            await save_user_session(session_id, session_data)
+            
+            # FIXED: Render confirmation message with context
+            confirmation_template = """✅ Perfeito, {user_name}! 
+
+Suas informações foram registradas com sucesso:
+📱 WhatsApp: {phone_number}
+
+Nossa equipe jurídica especializada entrará em contato em breve pelo WhatsApp para dar continuidade ao seu caso.
+
+Obrigado pela confiança! 🤝"""
+            
+            confirmation_message = render_question(confirmation_template, context)
             
             return {
                 "response": confirmation_message,
-                "response_type": "phone_collected",
+                "response_type": "phone_collected_fallback",
                 "session_id": session_id,
-                "flow_completed": True,
-                "phone_collected": True,
-                "collecting_phone": False,
-                "ai_mode": True,
-                "phone_number": phone_clean
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ Erro na coleta de telefone: {str(e)}")
-            return {
-                "response": "Erro ao processar seu número. Vamos continuar! Como posso ajudá-lo?",
-                "response_type": "phone_error_fallback",
-                "session_id": session_id,
-                "flow_completed": True,
-                "ai_mode": True,
-                "phone_collected": False
-            }
-
-    async def _send_whatsapp_confirmation_and_notify(
-        self,
-        session_data: Dict[str, Any],
-        phone_formatted: str
-    ):
-        """
-        Enviar confirmação WhatsApp e notificar advogados.
-        """
-        try:
-            lead_data = session_data.get("lead_data", {})
-            user_name = lead_data.get("identification", "Cliente")
-            area_of_law = lead_data.get("area_qualification", "Não informado")
-            situation = lead_data.get("problem_description", "Não informado")
-            
-            user_message = f"""Olá {user_name}! 👋
-
-Recebemos suas informações e nossa equipe jurídica especializada vai entrar em contato em breve.
-
-📋 Resumo do seu caso:
-• Área: {area_of_law}
-• Situação: {situation[:100]}{'...' if len(situation) > 100 else ''}
-
-Obrigado por escolher nossos serviços! 🤝"""
-
-            try:
-                await baileys_service.send_whatsapp_message(
-                    f"{phone_formatted}@s.whatsapp.net",
-                    user_message
-                )
-                logger.info(f"✅ Confirmação enviada para: {phone_formatted}")
-            except Exception as e:
-                logger.error(f"❌ Erro ao enviar confirmação: {str(e)}")
-            
-            # Notificar advogados
-            try:
-                await lawyer_notification_service.notify_lawyers_of_new_lead(
-                    lead_name=user_name,
-                    lead_phone=session_data.get("phone_number", ""),
-                    category=area_of_law,
-                    additional_info={
-                        "situation": situation,
-                        "platform": session_data.get("platform", "web"),
-                        "session_id": session_data.get("session_id")
-                    }
-                )
-                logger.info(f"✅ Advogados notificados para: {user_name}")
-            except Exception as e:
-                logger.error(f"❌ Erro ao notificar advogados: {str(e)}")
-                
-        except Exception as e:
-            logger.error(f"❌ Erro na confirmação WhatsApp: {str(e)}")
-
-    async def _handle_ai_conversation(
-        self,
-        message: str,
-        session_id: str,
-        session_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """
-        Lidar com conversa AI após completar o fluxo.
-        """
-        try:
-            # Tentar Gemini AI primeiro
-            if not self._is_gemini_unavailable():
-                try:
-                    context = {
-                        "name": session_data.get("lead_data", {}).get("identification"),
-                        "contact_info": session_data.get("lead_data", {}).get("contact_info"),
-                        "area_of_law": session_data.get("lead_data", {}).get("area_qualification"),
-                        "situation": session_data.get("lead_data", {}).get("problem_description"),
-                        "platform": session_data.get("platform", "web")
-                    }
-                    
-                    ai_response = await ai_orchestrator.generate_response(
-                        message, session_id, context
-                    )
-                    
-                    await self._persist_session_safely(session_id, session_data)
-                    
-                    return {
-                        "response": ai_response,
-                        "response_type": "ai_intelligent",
-                        "session_id": session_id,
-                        "flow_completed": True,
-                        "phone_collected": True,
-                        "ai_mode": True,
-                        "gemini_available": True
-                    }
-                    
-                except Exception as e:
-                    if self._is_quota_error(str(e)):
-                        self._mark_gemini_unavailable()
-                        logger.warning("🚫 Gemini quota exceeded, using fallback")
-                    else:
-                        logger.error(f"❌ Gemini error: {str(e)}")
-            
-            # Fallback personalizado
-            user_name = session_data.get("lead_data", {}).get("identification", "")
-            area_of_law = session_data.get("lead_data", {}).get("area_qualification", "")
-            
-            if user_name and user_name != "Não informado":
-                if area_of_law and area_of_law != "Não informado":
-                    fallback_response = f"Obrigado pela sua mensagem, {user_name}! Entendi que você precisa de ajuda com {area_of_law}. Nossa equipe especializada já tem suas informações e entrará em contato em breve para dar continuidade ao seu caso."
-                else:
-                    fallback_response = f"Obrigado pela sua mensagem, {user_name}! Nossa equipe já tem suas informações e entrará em contato em breve para dar continuidade ao seu caso."
-            else:
-                fallback_response = "Obrigado pela sua mensagem! Nossa equipe já tem suas informações e entrará em contato em breve para dar continuidade ao seu caso."
-            
-            return {
-                "response": fallback_response,
-                "response_type": "ai_fallback",
-                "session_id": session_id,
-                "flow_completed": True,
-                "phone_collected": True,
-                "ai_mode": True,
+                "fallback_completed": True,
+                "phone_submitted": True,
+                "phone_number": clean_phone,
+                "whatsapp_sent": whatsapp_success,
+                "lawyers_notified": notification_success,
+                "lead_data": lead_data,
+                "ai_mode": False,
                 "gemini_available": False
             }
             
         except Exception as e:
-            logger.error(f"❌ Erro na conversa AI: {str(e)}")
+            logger.error(f"❌ Error in phone collection: {str(e)}")
             return {
-                "response": "Como posso ajudá-lo?",
-                "response_type": "ai_error_fallback",
+                "response": "Obrigado! Suas informações foram registradas. Nossa equipe entrará em contato em breve.",
+                "response_type": "phone_collected_fallback",
                 "session_id": session_id,
-                "ai_mode": True
+                "fallback_completed": True,
+                "phone_submitted": True,
+                "error": str(e)
             }
-
-    def _validate_answer(self, answer: str, step: int, step_data: Dict[str, Any] = None) -> bool:
-        """
-        Validar respostas do usuário baseado no step.
-        """
-        logger.info(f"🔍 Validando resposta para step {step}: '{answer}' (length: {len(answer.strip())})")
+    
+    def _is_phone_number(self, text: str) -> bool:
+        """Check if text contains a valid phone number"""
+        # Remove all non-digits
+        digits = re.sub(r'\D', '', text)
         
-        if not answer or len(answer.strip()) < 1:
-            logger.warning(f"❌ Resposta vazia para step {step}")
-            return False
-        
-        # Se for mensagem de inicialização, não é resposta válida
-        if self._is_initialization_message(answer, step):
-            logger.warning(f"❌ Mensagem de inicialização não é resposta válida para step {step}")
-            return False
-        
-        # Usar validação do Firebase se disponível
-        if step_data and "validation" in step_data:
-            validation = step_data["validation"]
-            
-            if validation.get("required", True) and len(answer.strip()) == 0:
-                logger.warning(f"❌ Campo obrigatório vazio para step {step}")
-                return False
-            
-            min_length = validation.get("min_length", 2)
-            if len(answer.strip()) < min_length:
-                logger.warning(f"❌ Resposta muito curta para step {step} (mín: {min_length})")
-                return False
-            
-            validation_type = validation.get("type")
-            if validation_type == "contact_combined":
-                has_phone = bool(re.search(r'\d{8,}', answer))
-                has_email = bool(re.search(r'\S+@\S+\.\S+', answer))
-                if not (has_phone or has_email):
-                    logger.warning(f"❌ Contato inválido para step {step}")
-                    return False
-        
-        # Validação padrão
-        try:
-            if step == 1:  # Nome
-                answer_clean = answer.strip()
-                if (answer_clean.isdigit() or 
-                    len(answer_clean) < 2 or 
-                    answer_clean.lower() in ["oi", "olá", "hello", "hi"]):
-                    return False
-                return True
-            elif step == 2:  # Contato
-                has_phone = bool(re.search(r'\d{8,}', answer))
-                has_email = bool(re.search(r'\S+@\S+\.\S+', answer))
-                return has_phone or has_email
-            elif step == 3:  # Área
-                return len(answer.strip()) >= 3
-            elif step == 4:  # Situação
-                return len(answer.strip()) >= 10
-        except Exception as e:
-            logger.error(f"❌ Erro na validação: {str(e)}")
+        # Brazilian phone: 10-13 digits
+        if 10 <= len(digits) <= 13:
             return True
         
-        return True
-
-    def _is_phone_number(self, text: str) -> bool:
-        """Verificar se texto parece número de telefone."""
-        phone_clean = re.sub(r'[^\d]', '', text)
-        return 10 <= len(phone_clean) <= 13
-
-    def _is_quota_error(self, error_message: str) -> bool:
-        """Verificar se erro é relacionado a quota/limite de API."""
-        error_lower = error_message.lower()
-        quota_indicators = [
-            "429", "quota", "rate limit", "resourceexhausted", 
-            "billing", "exceeded", "too many requests"
-        ]
-        return any(indicator in error_lower for indicator in quota_indicators)
-
-    def _mark_gemini_unavailable(self):
-        """Marcar Gemini como temporariamente indisponível."""
-        self.gemini_unavailable_until = datetime.now() + self.gemini_check_interval
-        logger.warning(f"🚫 Gemini marcado indisponível até {self.gemini_unavailable_until}")
-
-    def _is_gemini_unavailable(self) -> bool:
-        """Verificar se Gemini está marcado como indisponível."""
-        if self.gemini_unavailable_until is None:
-            return False
+        return False
+    
+    def _clean_phone_number(self, phone: str) -> str:
+        """Clean and format phone number"""
+        # Remove all non-digits
+        digits = re.sub(r'\D', '', phone)
         
-        if datetime.now() > self.gemini_unavailable_until:
-            self.gemini_unavailable_until = None
-            logger.info("✅ Disponibilidade do Gemini restaurada")
-            return False
+        # Add country code if missing
+        if len(digits) == 11 and digits.startswith(('11', '12', '13', '14', '15', '16', '17', '18', '19', '21', '22', '24', '27', '28')):
+            digits = f"55{digits}"
+        elif len(digits) == 10:
+            # Assume it's missing the 9 for mobile
+            area_code = digits[:2]
+            number = digits[2:]
+            if len(number) == 8 and not number.startswith('9'):
+                digits = f"55{area_code}9{number}"
+            else:
+                digits = f"55{digits}"
         
-        return True
+        return digits
+    
+    async def _send_whatsapp_messages(
+        self, 
+        phone_number: str, 
+        user_name: str, 
+        lead_data: Dict[str, Any],
+        session_id: str
+    ) -> bool:
+        """Send WhatsApp messages to user and internal team"""
+        try:
+            # Format phone for WhatsApp
+            whatsapp_phone = f"{phone_number}@s.whatsapp.net"
+            
+            # FIXED: Create context for message templates
+            context = {
+                "user_name": user_name,
+                "name": user_name,
+                "phone_number": phone_number,
+                "area": lead_data.get("area_qualification", lead_data.get("area", "Não informado")),
+                "situation": lead_data.get("problem_description", lead_data.get("situation", "Não informado"))
+            }
+            
+            # User welcome message template
+            welcome_template = """Olá {user_name}! 👋
 
-    # Métodos adicionais para compatibilidade
-    async def handle_whatsapp_authorization(self, auth_data: Dict[str, Any]):
-        """Lidar com autorização WhatsApp."""
+Recebemos suas informações e nossa equipe jurídica especializada já está analisando seu caso.
+
+📋 Dados confirmados:
+• Área: {area}
+• Situação: {situation}
+
+Em breve um de nossos advogados entrará em contato para dar continuidade ao atendimento.
+
+Obrigado pela confiança! ⚖️"""
+            
+            welcome_message = render_question(welcome_template, context)
+            
+            # Send to user
+            user_success = await baileys_service.send_whatsapp_message(whatsapp_phone, welcome_message)
+            
+            if user_success:
+                logger.info(f"📤 Welcome message sent to user {phone_number}")
+            else:
+                logger.error(f"❌ Failed to send welcome message to {phone_number}")
+            
+            # Internal notification
+            internal_phone = os.getenv("WHATSAPP_PHONE_NUMBER", "5511918368812")
+            internal_whatsapp = f"{internal_phone}@s.whatsapp.net"
+            
+            internal_template = """🚨 Nova Lead Capturada via Chatbot!
+
+👤 Nome: {user_name}
+📱 WhatsApp: {phone_number}
+⚖️ Área: {area}
+📝 Situação: {situation}
+
+🕐 Capturado em: {timestamp}
+💻 Plataforma: Web Chat
+
+⚡ AÇÃO NECESSÁRIA: Entre em contato com o cliente o mais rápido possível!"""
+            
+            context["timestamp"] = datetime.now().strftime("%d/%m/%Y às %H:%M")
+            internal_message = render_question(internal_template, context)
+            
+            # Send internal notification
+            internal_success = await baileys_service.send_whatsapp_message(internal_whatsapp, internal_message)
+            
+            if internal_success:
+                logger.info(f"📤 Internal notification sent to {internal_phone}")
+            else:
+                logger.error(f"❌ Failed to send internal notification")
+            
+            return user_success and internal_success
+            
+        except Exception as e:
+            logger.error(f"❌ Error sending WhatsApp messages: {str(e)}")
+            return False
+    
+    async def _notify_lawyers(self, user_name: str, phone_number: str, lead_data: Dict[str, Any]) -> bool:
+        """Notify lawyers about new lead"""
+        try:
+            area = lead_data.get("area_qualification", lead_data.get("area", "Não informado"))
+            
+            notification_result = await lawyer_notification_service.notify_lawyers_of_new_lead(
+                lead_name=user_name,
+                lead_phone=phone_number,
+                category=area,
+                additional_info=lead_data
+            )
+            
+            success = notification_result.get("success", False)
+            if success:
+                logger.info(f"📧 Lawyers notified about lead: {user_name}")
+            else:
+                logger.error(f"❌ Failed to notify lawyers: {notification_result.get('error', 'Unknown error')}")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"❌ Error notifying lawyers: {str(e)}")
+            return False
+    
+    async def handle_phone_number_submission(
+        self, 
+        phone_number: str, 
+        session_id: str, 
+        user_name: str = None
+    ) -> Dict[str, Any]:
+        """Handle phone number submission from web interface"""
+        try:
+            logger.info(f"📱 Handling phone submission | session={session_id} | phone={phone_number}")
+            
+            # Get session data
+            session_data = await get_user_session(session_id)
+            if not session_data:
+                return {
+                    "success": False,
+                    "error": "Session not found",
+                    "message": "Sessão não encontrada. Reinicie o chat."
+                }
+            
+            # Process as phone collection
+            result = await self._handle_phone_collection(phone_number, session_id, session_data)
+            
+            return {
+                "success": True,
+                "message": "Número de WhatsApp registrado com sucesso!",
+                "phone_number": phone_number,
+                "whatsapp_sent": result.get("whatsapp_sent", False),
+                "lawyers_notified": result.get("lawyers_notified", False),
+                "result": result
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error in phone submission: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "message": "Erro ao processar número de WhatsApp. Tente novamente."
+            }
+    
+    async def handle_whatsapp_authorization(self, auth_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle WhatsApp authorization from web interface"""
         try:
             session_id = auth_data.get("session_id")
             phone_number = auth_data.get("phone_number")
+            source = auth_data.get("source", "unknown")
+            user_data = auth_data.get("user_data", {})
             
-            session_data = {
-                "session_id": session_id,
-                "platform": "whatsapp",
-                "current_step": 1,
-                "flow_completed": False,
-                "collecting_phone": False,
-                "phone_collected": False,
-                "ai_mode": False,
-                "lead_data": {},
-                "message_count": 0,
-                "phone_number": phone_number,
-                "created_at": datetime.now(),
-                "last_updated": datetime.now(),
-                "flow_source": "firebase"
-            }
+            logger.info(f"🔐 Processing WhatsApp authorization | session={session_id} | source={source}")
             
-            await self._persist_session_safely(session_id, session_data)
-            
-            # Enviar mensagem inicial
-            flow = await self._get_flow_with_cache()
-            initial_step = next((s for s in flow["steps"] if s["id"] == 1), None)
-            if initial_step:
-                welcome_message = f"👋 Olá! Bem-vindo ao nosso escritório de advocacia.\n\n{initial_step['question']}"
-            else:
-                welcome_message = "👋 Olá! Qual é o seu nome completo?"
-            
-            try:
-                await baileys_service.send_whatsapp_message(
-                    f"{phone_number}@s.whatsapp.net",
-                    welcome_message
-                )
-            except Exception as e:
-                logger.error(f"❌ Erro ao enviar mensagem inicial: {str(e)}")
-            
-            return {"success": True, "session_id": session_id}
-            
-        except Exception as e:
-            logger.error(f"❌ Erro na autorização WhatsApp: {str(e)}")
-            return {"success": False, "error": str(e)}
-
-    async def handle_phone_number_submission(self, phone_number: str, session_id: str, user_name: str = "Cliente") -> Dict[str, Any]:
-        """Lidar com submissão de número de telefone."""
-        try:
+            # Get or create session
             session_data = await get_user_session(session_id)
             if not session_data:
-                return {"success": False, "error": "Session not found"}
+                session_data = await self._create_new_session(session_id, "whatsapp", phone_number)
             
-            phone_clean = re.sub(r'[^\d]', '', phone_number)
+            # Update with authorization data
+            session_data["whatsapp_authorized"] = True
+            session_data["authorization_source"] = source
+            session_data["phone_number"] = phone_number
             
-            if len(phone_clean) < 10 or len(phone_clean) > 11:
-                return {"success": False, "error": "Invalid phone number format"}
+            # If we have user data from web chat, store it
+            if user_data:
+                lead_data = session_data.get("lead_data", {})
+                
+                # Map web data to our structure
+                if user_data.get("name"):
+                    lead_data["identification"] = user_data["name"]
+                    lead_data["name"] = user_data["name"]
+                    lead_data["user_name"] = user_data["name"]
+                
+                if user_data.get("email"):
+                    contact_info = lead_data.get("contact_info", "")
+                    if contact_info:
+                        lead_data["contact_info"] = f"{contact_info}, Email: {user_data['email']}"
+                    else:
+                        lead_data["contact_info"] = f"Email: {user_data['email']}"
+                
+                if user_data.get("area"):
+                    lead_data["area_qualification"] = user_data["area"]
+                    lead_data["area"] = user_data["area"]
+                
+                if user_data.get("description"):
+                    lead_data["problem_description"] = user_data["description"]
+                    lead_data["situation"] = user_data["description"]
+                
+                session_data["lead_data"] = lead_data
             
-            if len(phone_clean) == 10:
-                phone_formatted = f"55{phone_clean[:2]}9{phone_clean[2:]}"
-            else:
-                phone_formatted = f"55{phone_clean}"
+            await save_user_session(session_id, session_data)
             
-            session_data["phone_collected"] = True
-            session_data["phone_number"] = phone_clean
-            session_data["phone_formatted"] = phone_formatted
-            session_data["ai_mode"] = True
-            session_data["collecting_phone"] = False
-            
-            await self._persist_session_safely(session_id, session_data)
-            
-            try:
-                await self._send_whatsapp_confirmation_and_notify(session_data, phone_formatted)
-            except Exception as e:
-                logger.error(f"⚠️ Erro ao enviar confirmações: {str(e)}")
-            
-            return {"success": True, "phone_number": phone_clean}
-            
-        except Exception as e:
-            logger.error(f"❌ Erro na submissão de telefone: {str(e)}")
-            return {"success": False, "error": str(e)}
-
-    async def get_session_context(self, session_id: str) -> Dict[str, Any]:
-        """Obter contexto da sessão."""
-        try:
-            session_data = await get_user_session(session_id)
-            if not session_data:
-                return {"exists": False}
+            logger.info(f"✅ WhatsApp authorization processed for {session_id}")
             
             return {
-                "exists": True,
-                "session_data": session_data,
-                "current_step": session_data.get("current_step"),
-                "flow_completed": session_data.get("flow_completed", False),
-                "phone_collected": session_data.get("phone_collected", False),
-                "ai_mode": session_data.get("ai_mode", False),
-                "collecting_phone": session_data.get("collecting_phone", False),
-                "platform": session_data.get("platform", "unknown"),
-                "lead_data": session_data.get("lead_data", {}),
-                "message_count": session_data.get("message_count", 0),
-                "flow_source": session_data.get("flow_source", "unknown")
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ Erro ao obter contexto da sessão: {str(e)}")
-            return {"exists": False, "error": str(e)}
-
-    async def reset_session(self, session_id: str) -> Dict[str, Any]:
-        """Resetar sessão para testes."""
-        try:
-            fresh_session = {
+                "success": True,
+                "message": "WhatsApp authorization processed successfully",
                 "session_id": session_id,
-                "platform": "web",
-                "current_step": 1,
-                "flow_completed": False,
-                "collecting_phone": False,
-                "phone_collected": False,
-                "ai_mode": False,
-                "lead_data": {},
-                "message_count": 0,
-                "created_at": datetime.now(),
-                "last_updated": datetime.now(),
-                "reset_at": datetime.now(),
-                "flow_source": "firebase"
+                "phone_number": phone_number,
+                "source": source
             }
             
-            await self._persist_session_safely(session_id, fresh_session)
-            logger.info(f"✅ Sessão resetada: {session_id}")
-            
-            return {"success": True, "message": "Session reset successfully"}
         except Exception as e:
-            logger.error(f"❌ Erro ao resetar sessão: {str(e)}")
-            return {"success": False, "error": str(e)}
+            logger.error(f"❌ Error in WhatsApp authorization: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "message": "Erro ao processar autorização do WhatsApp"
+            }
+    
+    async def get_session_context(self, session_id: str) -> Dict[str, Any]:
+        """Get session context and status"""
+        try:
+            session_data = await get_user_session(session_id)
+            if not session_data:
+                return {"error": "Session not found"}
+            
+            return {
+                "session_id": session_id,
+                "platform": session_data.get("platform", "unknown"),
+                "created_at": session_data.get("created_at"),
+                "message_count": session_data.get("message_count", 0),
+                "current_step": session_data.get("fallback_step", 1),
+                "fallback_completed": session_data.get("fallback_completed", False),
+                "phone_submitted": session_data.get("phone_submitted", False),
+                "gemini_available": session_data.get("gemini_available", True),
+                "lead_data": session_data.get("lead_data", {}),
+                "phone_number": session_data.get("phone_number"),
+                "whatsapp_authorized": session_data.get("whatsapp_authorized", False)
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting session context: {str(e)}")
+            return {"error": str(e)}
+    
+    async def reset_session(self, session_id: str) -> Dict[str, Any]:
+        """Reset a session (useful for testing)"""
+        try:
+            # Clear session data
+            await save_user_session(session_id, None)
+            
+            logger.info(f"🔄 Session {session_id} reset successfully")
+            
+            return {
+                "success": True,
+                "message": f"Session {session_id} reset successfully",
+                "session_id": session_id
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error resetting session: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "message": "Failed to reset session"
+            }
+    
+    async def get_overall_service_status(self) -> Dict[str, Any]:
+        """Get comprehensive service status"""
+        try:
+            from app.services.firebase_service import get_firebase_service_status
+            from app.services.ai_chain import get_ai_service_status
+            
+            # Get individual service statuses
+            firebase_status = await get_firebase_service_status()
+            ai_status = await get_ai_service_status()
+            
+            # Determine overall status
+            firebase_ok = firebase_status.get("status") == "active"
+            ai_ok = ai_status.get("status") == "active"
+            
+            if firebase_ok and (ai_ok or not self.gemini_available):
+                overall_status = "active"
+            elif firebase_ok:
+                overall_status = "degraded"
+            else:
+                overall_status = "error"
+            
+            return {
+                "overall_status": overall_status,
+                "firebase_status": firebase_status,
+                "ai_status": ai_status,
+                "gemini_available": self.gemini_available,
+                "fallback_mode": not self.gemini_available,
+                "last_gemini_check": self.last_gemini_check.isoformat(),
+                "features": {
+                    "firebase_fallback": firebase_ok,
+                    "ai_responses": ai_ok,
+                    "session_persistence": firebase_ok,
+                    "whatsapp_integration": True,
+                    "lawyer_notifications": True,
+                    "lead_collection": firebase_ok
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting service status: {str(e)}")
+            return {
+                "overall_status": "error",
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
 
-
-# Instância global do orchestrador
+# Global orchestrator instance
 intelligent_orchestrator = IntelligentHybridOrchestrator()

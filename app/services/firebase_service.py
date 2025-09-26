@@ -19,31 +19,31 @@ _memory_sessions = {}
 
 def render_question(question_template: str, context: Dict[str, Any]) -> str:
     """
-    🔧 CORRIGIDO: Renderiza uma pergunta substituindo placeholders de forma mais robusta.
+    🔧 FIXED: Renders question with robust placeholder replacement
     """
     try:
         if not question_template or "{" not in question_template:
             return question_template
         
-        logger.info(f"🔧 RENDER_QUESTION - Template: '{question_template[:100]}...'")
-        logger.info(f"🔧 RENDER_QUESTION - Context: {context}")
+        logger.debug(f"🔧 RENDER_QUESTION - Template: '{question_template[:100]}...'")
+        logger.debug(f"🔧 RENDER_QUESTION - Context: {context}")
         
-        # Criar mapeamento mais robusto de placeholders
+        # Create robust placeholder mapping
         placeholder_map = {}
         
-        # Primeiro, mapear campos diretos
+        # First, map direct fields
         for key, value in context.items():
             if value and str(value).strip():
                 clean_value = str(value).strip()
                 placeholder_map[f"{{{key}}}"] = clean_value
         
-        # Depois, mapear aliases específicos baseados nos campos conhecidos
+        # Then, map specific aliases based on known fields
         identification = context.get("identification") or context.get("name") or context.get("user_name", "")
         if identification:
-            # Todos os possíveis aliases para nome
+            # All possible aliases for name
             name_aliases = [
                 "{user_name}", "{user name}", "{name}", "{identification}", 
-                "{nome}", "{usuario}", "{cliente}" "{username}"
+                "{nome}", "{usuario}", "{cliente}", "{username}"
             ]
             for alias in name_aliases:
                 placeholder_map[alias] = identification
@@ -75,33 +75,33 @@ def render_question(question_template: str, context: Dict[str, Any]) -> str:
             for alias in situation_aliases:
                 placeholder_map[alias] = problem_description
         
-        logger.info(f"🔧 PLACEHOLDER_MAP criado: {placeholder_map}")
+        logger.debug(f"🔧 PLACEHOLDER_MAP created: {placeholder_map}")
         
-        # Aplicar substituições
+        # Apply substitutions
         processed_text = question_template
         for placeholder, value in placeholder_map.items():
             if placeholder in processed_text:
                 processed_text = processed_text.replace(placeholder, value)
-                logger.info(f"✅ Substituído '{placeholder}' por '{value}'")
+                logger.debug(f"✅ Replaced '{placeholder}' with '{value}'")
         
-        # Limpar placeholders não substituídos
+        # Clean unsubstituted placeholders
         remaining_placeholders = re.findall(r'\{[^}]+\}', processed_text)
         if remaining_placeholders:
-            logger.warning(f"⚠️ Placeholders restantes: {remaining_placeholders}")
-            # Remove placeholders vazios
+            logger.warning(f"⚠️ Remaining placeholders: {remaining_placeholders}")
+            # Remove empty placeholders
             processed_text = re.sub(r'\{[^}]+\}', '', processed_text)
         
-        # Limpar formatação
+        # Clean formatting
         processed_text = processed_text.replace("\\n", "\n")
         processed_text = re.sub(r'\n\s*\n', '\n\n', processed_text)
         processed_text = re.sub(r'[ \t]+', ' ', processed_text)
         processed_text = processed_text.strip()
         
-        logger.info(f"🔧 RESULTADO FINAL: '{processed_text[:100]}...'")
+        logger.debug(f"🔧 FINAL RESULT: '{processed_text[:100]}...'")
         return processed_text
         
     except Exception as e:
-        logger.error(f"❌ Erro ao renderizar pergunta: {str(e)}")
+        logger.error(f"❌ Error rendering question: {str(e)}")
         import traceback
         logger.error(f"🔍 Traceback: {traceback.format_exc()}")
         return question_template or ""
