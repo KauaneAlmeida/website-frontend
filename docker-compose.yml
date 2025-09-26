@@ -4,15 +4,16 @@ services:
   law_firm_backend:
     build:
       context: .
-      dockerfile: Dockerfile.backend
+      dockerfile: Dockerfile
     container_name: law_firm_backend
     restart: always
     ports:
-      - "8000:8080"              # host 8000 → container 8080
+      - "8000:8080"              # Map host 8000 to container 8080
     environment:
       - NODE_ENV=production
       - PYTHONUNBUFFERED=1
-      - WHATSAPP_BOT_URL=http://law_firm_whatsapp_bot:8080   # 👈 interno 8080
+      - PORT=8080                # CRITICAL: Set PORT for Cloud Run compatibility
+      - WHATSAPP_BOT_URL=http://law_firm_whatsapp_bot:8080
     env_file:
       - .env
     volumes:
@@ -23,7 +24,7 @@ services:
       law_firm_whatsapp_bot:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]  # 👈 porta interna certa
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3

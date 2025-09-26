@@ -19,92 +19,133 @@ _memory_sessions = {}
 
 def render_question(question_template: str, context: Dict[str, Any]) -> str:
     """
-    🔧 FIXED: Renders question with robust placeholder replacement
+    🔧 ENHANCED: Renders question with comprehensive placeholder replacement
     """
     try:
         if not question_template or "{" not in question_template:
             return question_template
         
-        logger.debug(f"🔧 RENDER_QUESTION - Template: '{question_template[:100]}...'")
-        logger.debug(f"🔧 RENDER_QUESTION - Context: {context}")
+        logger.info(f"🔧 RENDER_QUESTION - Template: '{question_template[:100]}...'")
+        logger.info(f"🔧 RENDER_QUESTION - Context keys: {list(context.keys())}")
         
-        # Create robust placeholder mapping
+        # Create comprehensive placeholder mapping
         placeholder_map = {}
         
-        # First, map direct fields
+        # 1. Map all direct context fields
         for key, value in context.items():
             if value and str(value).strip():
                 clean_value = str(value).strip()
                 placeholder_map[f"{{{key}}}"] = clean_value
+                # Also map with underscores and without
+                placeholder_map[f"{{{key.replace('_', '')}}}"] = clean_value
+                placeholder_map[f"{{{key.replace('_', ' ')}}}"] = clean_value
         
-        # Then, map specific aliases based on known fields
+        # 2. CRITICAL: Handle all name variations
         identification = context.get("identification") or context.get("name") or context.get("user_name", "")
         if identification:
-            # All possible aliases for name
+            clean_name = str(identification).strip()
             name_aliases = [
-                "{user_name}", "{user name}", "{name}", "{identification}", 
-                "{nome}", "{usuario}", "{cliente}", "{username}"
+                "{user_name}", "{user name}", "{username}", "{name}", "{identification}", 
+                "{nome}", "{usuario}", "{cliente}", "{userName}", "{user-name}",
+                # Handle case variations
+                "{User_Name}", "{USER_NAME}", "{Name}", "{USERNAME}"
             ]
             for alias in name_aliases:
-                placeholder_map[alias] = identification
+                placeholder_map[alias] = clean_name
+                placeholder_map[alias.lower()] = clean_name
         
+        # 3. Handle contact information
         contact_info = context.get("contact_info") or context.get("contact") or context.get("phone", "")
         if contact_info:
+            clean_contact = str(contact_info).strip()
             contact_aliases = [
                 "{contact_info}", "{contact}", "{phone}", "{telefone}", 
-                "{contato}", "{whatsapp}"
+                "{contato}", "{whatsapp}", "{phone_number}"
             ]
             for alias in contact_aliases:
-                placeholder_map[alias] = contact_info
+                placeholder_map[alias] = clean_contact
         
+        # 4. Handle area/legal field
         area_qualification = context.get("area_qualification") or context.get("area") or context.get("area_of_law", "")
         if area_qualification:
+            clean_area = str(area_qualification).strip()
             area_aliases = [
                 "{area}", "{area_of_law}", "{area_qualification}", 
-                "{area_direito}", "{especialidade}"
+                "{area_direito}", "{especialidade}", "{areaoflaw}"
             ]
             for alias in area_aliases:
-                placeholder_map[alias] = area_qualification
+                placeholder_map[alias] = clean_area
         
+        # 5. Handle situation/problem description
         problem_description = context.get("problem_description") or context.get("situation") or context.get("case_details", "")
         if problem_description:
+            clean_situation = str(problem_description).strip()
             situation_aliases = [
                 "{situation}", "{case_details}", "{problem_description}", 
-                "{situacao}", "{problema}", "{caso}"
+                "{situacao}", "{problema}", "{caso}", "{casedetails}"
             ]
             for alias in situation_aliases:
-                placeholder_map[alias] = problem_description
+                placeholder_map[alias] = clean_situation
         
-        logger.debug(f"🔧 PLACEHOLDER_MAP created: {placeholder_map}")
+        logger.info(f"🔧 PLACEHOLDER_MAP created with {len(placeholder_map)} mappings")
         
-        # Apply substitutions
+        # 6. Apply all substitutions (case-insensitive)
         processed_text = question_template
+        
+        # First pass: exact matches
         for placeholder, value in placeholder_map.items():
             if placeholder in processed_text:
                 processed_text = processed_text.replace(placeholder, value)
-                logger.debug(f"✅ Replaced '{placeholder}' with '{value}'")
+                logger.info(f"✅ Replaced '{placeholder}' with '{value[:30]}...'")
         
-        # Clean unsubstituted placeholders
+        # Second pass: case-insensitive matches for remaining placeholders
+        import re
+        remaining_placeholders = re.findall(r'\{[^}]+\}', processed_text)
+        for remaining in remaining_placeholders:
+            for placeholder, value in placeholder_map.items():
+                if remaining.lower() == placeholder.lower():
+                    processed_text = processed_text.replace(remaining, value)
+                    logger.info(f"✅ Case-insensitive replaced '{remaining}' with '{value[:30]}...'")
+                    break
+        
+        # 7. Handle any remaining unsubstituted placeholders
         remaining_placeholders = re.findall(r'\{[^}]+\}', processed_text)
         if remaining_placeholders:
-            logger.warning(f"⚠️ Remaining placeholders: {remaining_placeholders}")
-            # Remove empty placeholders
-            processed_text = re.sub(r'\{[^}]+\}', '', processed_text)
+            logger.warning(f"⚠️ Unresolved placeholders: {remaining_placeholders}")
+            logger.warning(f"⚠️ Available context: {list(context.keys())}")
+            
+            # Try to fill with fallback values
+            for placeholder in remaining_placeholders:
+                if any(name_word in placeholder.lower() for name_word in ['name', 'user', 'nome', 'usuario']):
+                    # Try to find any name-like value in context
+                    fallback_name = (
+                        context.get("identification") or 
+                        context.get("name") or 
+                        context.get("user_name") or
+                        "Cliente"
+                    )
+                    processed_text = processed_text.replace(placeholder, str(fallback_name))
+                    logger.info(f"🔄 Fallback replaced '{placeholder}' with '{fallback_name}'")
+                else:
+                    # Remove unresolved placeholders to avoid showing {placeholder} to user
+                    processed_text = processed_text.replace(placeholder, "")
+                    logger.warning(f"🗑️ Removed unresolved placeholder: '{placeholder}'")
         
-        # Clean formatting
+        # 8. Clean up formatting
         processed_text = processed_text.replace("\\n", "\n")
         processed_text = re.sub(r'\n\s*\n', '\n\n', processed_text)
         processed_text = re.sub(r'[ \t]+', ' ', processed_text)
         processed_text = processed_text.strip()
         
-        logger.debug(f"🔧 FINAL RESULT: '{processed_text[:100]}...'")
+        logger.info(f"🔧 FINAL RESULT: '{processed_text[:100]}...'")
         return processed_text
         
     except Exception as e:
         logger.error(f"❌ Error rendering question: {str(e)}")
         import traceback
         logger.error(f"🔍 Traceback: {traceback.format_exc()}")
-        return question_template or ""
+        # Return original template if rendering fails
+        return question_template or "Como posso ajudá-lo?"
 
 def _load_credentials_from_secret():
     """Carrega credenciais do Firebase a partir de múltiplas fontes."""
@@ -266,7 +307,7 @@ async def get_conversation_flow() -> Dict[str, Any]:
 
 def _get_fallback_flow() -> Dict[str, Any]:
     """
-    🔧 CORRIGIDO: Agora usa os mesmos campos que o orchestration_service espera.
+    🔧 ENHANCED: Fallback flow with proper placeholder templates
     """
     return {
         "steps": [
@@ -281,7 +322,7 @@ def _get_fallback_flow() -> Dict[str, Any]:
             {
                 "id": 2,
                 "field": "contact_info",
-                "question": "Prazer em conhecê-lo, {username}!\n\n📱 Qual o melhor telefone/WhatsApp para contato?\n\n📧 Você poderia informar seu e-mail também?",
+                "question": "Prazer em conhecê-lo, {user_name}!\n\n📱 Qual o melhor telefone/WhatsApp para contato?\n\n📧 Você poderia informar seu e-mail também?",
                 "validation": {"min_length": 10, "required": True, "type": "contact_combined"},
                 "error_message": "Por favor, informe seu telefone (com DDD) e e-mail para contato.",
                 "context": "contact_collection"
@@ -297,13 +338,13 @@ def _get_fallback_flow() -> Dict[str, Any]:
             {
                 "id": 4,
                 "field": "problem_description",
-                "question": "Entendi que você precisa de ajuda com {area_of_law}.\n\n📝 Descreva brevemente sua situação ou problema jurídico:",
+                "question": "Entendi que você precisa de ajuda com {area}.\n\n📝 Descreva brevemente sua situação ou problema jurídico:",
                 "validation": {"min_length": 10, "required": True, "type": "case_description"},
                 "error_message": "Por favor, descreva sua situação com mais detalhes para que possamos te ajudar melhor.",
                 "context": "case_assessment"
             }
         ],
-        "completion_message": "Perfeito, {user_name}! Um de nossos advogados especialistas em {area_of_law} já vai assumir seu atendimento.",
+        "completion_message": "Perfeito, {user_name}! Um de nossos advogados especialistas em {area} já vai assumir seu atendimento.",
         "created_at": datetime.now(),
         "updated_at": datetime.now()
     }
@@ -461,12 +502,25 @@ async def update_firestore_flow_with_placeholders():
 
 def create_context_from_session_data(session_data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    🔧 CORRIGIDO: Agora usa os campos corretos do Firebase para criar o contexto.
+    🔧 ENHANCED: Creates comprehensive context with all possible name variations
     """
     lead_data = session_data.get("lead_data", {})
     
-    # 🔧 NOVO: Log detalhado do que temos disponível
-    logger.info(f"🔍 CREATE_CONTEXT - lead_data recebido: {lead_data}")
+    logger.info(f"🔍 CREATE_CONTEXT - lead_data keys: {list(lead_data.keys())}")
+    
+    # Extract the best available name from multiple possible fields
+    best_name = (
+        lead_data.get("identification") or 
+        lead_data.get("name") or 
+        lead_data.get("user_name") or
+        lead_data.get("username") or
+        session_data.get("user_name") or
+        ""
+    )
+    
+    if best_name:
+        best_name = str(best_name).strip()
+        logger.info(f"🔍 CREATE_CONTEXT - best_name found: '{best_name}'")
     
     context = {
         # Campos primários do Firebase
@@ -477,9 +531,17 @@ def create_context_from_session_data(session_data: Dict[str, Any]) -> Dict[str, 
         "urgency_level": lead_data.get("urgency_level", ""),
         "meeting_preference": lead_data.get("meeting_preference", ""),
         
-        # Aliases para compatibilidade
-        "user_name": lead_data.get("identification", ""),
-        "name": lead_data.get("identification", ""),
+        # CRITICAL: All name variations use the best available name
+        "user_name": best_name,
+        "username": best_name,
+        "name": best_name,
+        "userName": best_name,
+        "user-name": best_name,
+        "nome": best_name,
+        "usuario": best_name,
+        "cliente": best_name or "Cliente",
+        
+        # Other aliases for compatibility
         "contact": lead_data.get("contact_info", ""),
         "area": lead_data.get("area_qualification", ""),
         "area_of_law": lead_data.get("area_qualification", ""),
@@ -496,12 +558,15 @@ def create_context_from_session_data(session_data: Dict[str, Any]) -> Dict[str, 
         "whatsapp": lead_data.get("whatsapp", lead_data.get("contact_info", "")),
     }
     
-    logger.info(f"🔍 CREATE_CONTEXT - contexto criado: {context}")
+    # Log only the name-related fields for debugging
+    name_fields = {k: v for k, v in context.items() if 'name' in k.lower() or k in ['identification', 'nome', 'usuario', 'cliente']}
+    logger.info(f"🔍 CREATE_CONTEXT - name fields: {name_fields}")
+    
     return context
 
 def ensure_lead_step_from_message(session_data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    🔧 MELHORADO: Tenta preencher identification de forma mais robusta.
+    🔧 ENHANCED: Robust identification filling with better validation
     """
     if not session_data:
         return session_data or {}
@@ -511,17 +576,24 @@ def ensure_lead_step_from_message(session_data: Dict[str, Any]) -> Dict[str, Any
     current_step = session_data.get("current_step", 1)
 
     try:
-        # 🔧 CRÍTICO: Só aplicar heurística no step 1 e se identification ainda não existe
-        if current_step == 1 and last_msg and not lead_data.get("identification"):
+        # Only apply heuristic on step 1 and if no name exists yet
+        existing_name = (
+            lead_data.get("identification") or 
+            lead_data.get("name") or 
+            lead_data.get("user_name")
+        )
+        
+        if current_step == 1 and last_msg and not existing_name:
             # Lista de mensagens genéricas a ignorar
             invalid_greetings = {
                 "oi", "olá", "ola", "hello", "hi", "hey", "bom dia", "boa tarde", 
-                "boa noite", "eae", "e ai", "opa", "start", "iniciar", "começar"
+                "boa noite", "eae", "e ai", "opa", "start", "iniciar", "começar",
+                "sim", "não", "nao", "ok", "tudo bem", "beleza"
             }
 
             normalized_msg = last_msg.lower().strip()
 
-            # 🔧 MELHORADO: Validação mais rigorosa
+            # Enhanced validation for names
             if (
                 normalized_msg not in invalid_greetings
                 and 2 <= len(last_msg) <= 120  # Tamanho razoável para um nome
@@ -529,18 +601,18 @@ def ensure_lead_step_from_message(session_data: Dict[str, Any]) -> Dict[str, Any
                 and not last_msg.isdigit()  # Não pode ser só números
                 and len(last_msg.split()) >= 1  # Pelo menos uma palavra
                 and not any(char in last_msg for char in ['@', 'http', 'www'])  # Não é email/link
+                and not any(word in normalized_msg for word in ['telefone', 'email', 'whatsapp', 'contato'])  # Not contact info
             ):
-                # 🔧 CRÍTICO: Salvar no campo correto
+                # Save in all name fields for consistency
                 processed_name = last_msg.strip().title()
                 lead_data["identification"] = processed_name
-                
-                # Manter compatibilidade com campos alternativos
                 lead_data["name"] = processed_name
                 lead_data["user_name"] = processed_name
+                lead_data["username"] = processed_name
                 
-                logger.info(f"🔧 HEURÍSTICA APLICADA: identification = '{processed_name}'")
+                logger.info(f"🔧 HEURISTIC APPLIED: All name fields = '{processed_name}'")
             else:
-                logger.info(f"🔧 HEURÍSTICA IGNORADA: mensagem não parece ser nome: '{last_msg}'")
+                logger.info(f"🔧 HEURISTIC IGNORED: message doesn't look like a name: '{last_msg}'")
 
         session_data["lead_data"] = lead_data
         

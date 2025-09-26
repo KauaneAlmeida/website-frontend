@@ -305,7 +305,7 @@ class IntelligentHybridOrchestrator:
         step_data: Dict[str, Any]
     ) -> bool:
         """
-        FIXED: Process and validate step answers with proper field mapping
+        ENHANCED: Process and validate step answers with comprehensive name handling
         """
         try:
             answer = answer.strip()
@@ -325,11 +325,19 @@ class IntelligentHybridOrchestrator:
             lead_data = session_data.get("lead_data", {})
             lead_data[field_name] = normalized_answer
             
-            # FIXED: Also store with common aliases for template rendering
+            # CRITICAL: Store name in ALL possible name fields
             if field_name == "identification":
+                # Store in all name variations to ensure placeholder replacement works
                 lead_data["name"] = normalized_answer
                 lead_data["user_name"] = normalized_answer
                 lead_data["username"] = normalized_answer
+                lead_data["userName"] = normalized_answer
+                lead_data["user-name"] = normalized_answer
+                lead_data["nome"] = normalized_answer
+                lead_data["usuario"] = normalized_answer
+                
+                logger.info(f"🔧 STORED NAME in all fields: '{normalized_answer}'")
+                
             elif field_name == "area_qualification":
                 lead_data["area"] = normalized_answer
                 lead_data["area_of_law"] = normalized_answer
@@ -347,6 +355,10 @@ class IntelligentHybridOrchestrator:
             success = await update_lead_data_field(session_id, field_name, normalized_answer)
             if field_name == "identification":
                 await force_update_identification(session_id, normalized_answer)
+                
+                # Also update all name variations in Firebase
+                for name_field in ["name", "user_name", "username", "userName"]:
+                    await update_lead_data_field(session_id, name_field, normalized_answer)
             
             logger.info(f"💾 Stored answer for step {step_id} | field={field_name} | value='{normalized_answer}' | success={success}")
             

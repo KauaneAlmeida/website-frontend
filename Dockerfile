@@ -1,35 +1,51 @@
-# Imagem base enxuta com Python 3.11
+# Use Python 3.11 slim image for better performance
 FROM python:3.11-slim
 
-# Instalar dependências de build (precisas para pacotes nativos)
+# Set environment variables for Python
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
     gcc \
     curl \
- && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
-# Diretório de trabalho
+# Set working directory
 WORKDIR /app
 
-# Criar um usuário não-root para segurança
-RUN adduser --disabled-password --gecos '' appuser
+# Create non-root user for security
+RUN adduser --disabled-password --gecos '' --uid 1000 appuser
 
-# Copiar requirements e instalar pacotes Python
+# Copy requirements first for better caching
 COPY requirements.txt ./
-RUN pip install --upgrade pip \
- && pip install --no-cache-dir -r requirements.txt
 
-# Copiar código da aplicação
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
 COPY app/ ./app/
 
-# Ajustar permissões para o usuário appuser
+# Copy additional files if they exist
+COPY ai_schema.json ./ai_schema.json* || true
+
+# Change ownership to non-root user
 RUN chown -R appuser:appuser /app
 
-# Trocar para usuário não-root
+# Switch to non-root user
 USER appuser
 
-# Expor a porta padrão do Cloud Run (internamente ele injeta $PORT)
+# CRITICAL: Expose port 8080 for Cloud Run
 EXPOSE 8080
 
-# Comando de execução do Uvicorn (um worker é suficiente no Cloud Run)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# CRITICAL: Start command that respects PORT environment variable
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

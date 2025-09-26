@@ -359,12 +359,19 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8080))
+    # CRITICAL: Use PORT environment variable for Cloud Run compatibility
+    port = int(os.getenv("PORT", 8080))
+    host = "0.0.0.0"  # Must bind to all interfaces for Cloud Run
+    
+    logger.info(f"🚀 Starting server on {host}:{port}")
+    logger.info(f"📊 Environment: PORT={os.getenv('PORT', 'not set')}")
+    
     uvicorn.run(
         "app.main:app",
-        host="0.0.0.0",
+        host=host,
         port=port,
         log_level="info",
-        access_log=True,
-        loop="asyncio"
+        access_log=False,  # Reduce noise in Cloud Run logs
+        loop="asyncio",
+        workers=1  # Single worker for Cloud Run
     )
