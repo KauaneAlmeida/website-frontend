@@ -252,6 +252,7 @@ async def whatsapp_webhook(request: Request):
             message=message_text,
             session_id=session_id,
             phone_number=clean_phone,
+            phone_number=clean_phone,
             platform="whatsapp"
         )
         # Log da resposta

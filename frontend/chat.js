@@ -398,9 +398,22 @@
         };  
       }  
 
+      // Update user data from lead_data if available
+      if (response.lead_data) {
+        this.conversationState.userData = {
+          ...this.conversationState.userData,
+          ...response.lead_data
+        };
+      }
+
       if (response.step) {  
         this.conversationState.step = response.step;  
       }  
+
+      // Store current step for context
+      if (response.current_step) {
+        this.conversationState.current_step = response.current_step;
+      }
     }  
 
     addMessage(message) {  
@@ -447,17 +460,35 @@
     formatMessageText(text) {  
       if (!text) return "";  
 
-      console.log('🔍 DEBUG Frontend - Mensagem recebida:', text);  
+      console.log('🔍 DEBUG Frontend - Message received:', text);  
 
-      // Substitui placeholders por dados reais do usuário
+      // Replace placeholders with real user data
       const userData = this.conversationState?.userData || {};  
       text = text.replace(/\{([^}]+)\}/g, (match, key) => {  
         const cleanKey = key.trim().toLowerCase();  
         if (userData[cleanKey]) {  
           return userData[cleanKey];  
         }  
-        return ''; // remove se não encontrar  
+        return ''; // remove if not found
       });  
+
+      // Additional placeholder replacements for common patterns
+      if (this.conversationState?.userData) {
+        const data = this.conversationState.userData;
+        
+        // Replace common name patterns
+        text = text.replace(/\{user_name\}/gi, data.name || data.identification || '');
+        text = text.replace(/\{username\}/gi, data.name || data.identification || '');
+        text = text.replace(/\{name\}/gi, data.name || data.identification || '');
+        
+        // Replace area patterns
+        text = text.replace(/\{area\}/gi, data.area || data.area_qualification || '');
+        text = text.replace(/\{area_of_law\}/gi, data.area || data.area_qualification || '');
+        
+        // Replace situation patterns
+        text = text.replace(/\{situation\}/gi, data.situation || data.problem_description || '');
+        text = text.replace(/\{case_details\}/gi, data.situation || data.problem_description || '');
+      }
 
       return text  
         .replace(/\\n/g, '<br>')  
@@ -545,4 +576,4 @@
       setTimeout(initChat, 100);  
     }  
   });  
-})();  
+})();
